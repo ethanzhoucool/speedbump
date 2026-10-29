@@ -37,9 +37,14 @@ function render(data: Summary) {
     const pct = budget ? Math.min(100, (used / budget) * 100) : 100;
     const [label, cls] = stateText(r, now);
     const total = Math.min(8, Math.ceil(budget / (r.group.sessionMin * MIN)));
-    const done = Math.min(total, r.sessions);
-    // Sessions left on the left, spent ones on the right, so the row drains right to left.
-    const dots = `<span class="dots" title="${done} of ${total} sessions used">${Array.from({ length: total }, (_, i) => `<i class="${i >= total - done ? "used" : ""}"></i>`).join("")}</span>`;
+    // Each dot is one session's worth of minutes, so a 5 min visit spends a third of a 15 min dot.
+    // Dots empty from the right, matching the time-based "sessions left" count.
+    const per = r.group.sessionMin * MIN;
+    const spent = (i: number) => Math.max(0, Math.min(1, (used - (total - 1 - i) * per) / per));
+    const dots = `<span class="dots" title="${Math.round(used / MIN)} of ${Math.round(budget / MIN)} min used, ${r.group.sessionMin} min per dot">${Array.from({ length: total }, (_, i) => {
+      const f = spent(i);
+      return `<i class="${f >= 1 ? "used" : ""}" style="--f:${Math.round(f * 100)}%"></i>`;
+    }).join("")}</span>`;
     return `<li class="${r.status === "active" ? "live" : ""}">
       <div class="row"><span class="name"><img class="ico" src="${favicon(`https://${r.group.sites[0] || ""}`)}" alt="">${esc(r.group.name)}</span><span class="state num ${cls}">${label}</span></div>
       <div class="meter ${pct >= 100 ? "full" : ""}"><span style="width:${pct}%"></span></div>
