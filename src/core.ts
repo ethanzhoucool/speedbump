@@ -46,10 +46,11 @@ export interface Session {
 export interface GroupState {
   usedMs: number;
   session: Session | null;
-  cooldownUntil: number;
   attempts: number;
   dismissed: number;
   sessions: number;
+  // When the last session ended. The cooldown length is read from the current settings.
+  cooldownFrom: number;
   extraMs: number;
   penaltyMs: number;
   borrowedMs: number;
@@ -197,11 +198,22 @@ export function matchGroup(url: string, settings: Settings): Group | null {
 }
 
 export function freshGroupState(): GroupState {
-  return { usedMs: 0, session: null, cooldownUntil: 0, attempts: 0, dismissed: 0, sessions: 0, extraMs: 0, penaltyMs: 0, borrowedMs: 0, borrowStartedAt: 0 };
+  return { usedMs: 0, session: null, cooldownFrom: 0, attempts: 0, dismissed: 0, sessions: 0, extraMs: 0, penaltyMs: 0, borrowedMs: 0, borrowStartedAt: 0 };
 }
 
 export function emptyState(now: number, settings: Settings): State {
   return { day: dayKey(now, settings.resetHour), groups: {}, history: {}, debt: {} };
+}
+
+// Fills fields added in later versions and drops ones that were replaced.
+export function normalize(state: State): State {
+  state.history ||= {};
+  state.debt ||= {};
+  for (const [id, g] of Object.entries(state.groups || {})) {
+    const { cooldownUntil: _legacy, ...rest } = g as GroupState & { cooldownUntil?: number };
+    state.groups[id] = { ...freshGroupState(), ...rest };
+  }
+  return state;
 }
 
 export function gs(state: State, id: string): GroupState {
@@ -241,10 +253,14 @@ export function remainingMs(group: Group, g: GroupState, now: number): number {
   return Math.max(0, budgetMs(group, g) - usedMs(g, now));
 }
 
+export function cooldownUntil(group: Group, g: GroupState): number {
+  return g.cooldownFrom ? g.cooldownFrom + group.cooldownMin * MIN : 0;
+}
+
 export function status(group: Group, g: GroupState, now: number): Status {
   if (g.session && now < g.session.end) return "active";
   if (remainingMs(group, g, now) <= 0) return "exhausted";
-  if (now < g.cooldownUntil) return "cooldown";
+  if (now < cooldownUntil(group, g)) return "cooldown";
   return "ready";
 }
 
@@ -281,7 +297,7 @@ export function endSession(group: Group, g: GroupState, now: number): boolean {
   const stop = Math.min(now, g.session.end);
   g.usedMs += Math.max(0, stop - g.session.start);
   g.session = null;
-  if (remainingMs(group, g, stop) > 0) g.cooldownUntil = stop + group.cooldownMin * MIN;
+  g.cooldownFrom = stop;
   return true;
 }
 
@@ -296,7 +312,7 @@ export function borrow(group: Group, g: GroupState, now: number): number {
   const ms = BORROW.minutes * MIN;
   g.extraMs = (g.extraMs || 0) + ms;
   g.borrowedMs = ms;
-  g.cooldownUntil = 0;
+  g.cooldownFrom = 0;
   g.session = { start: now, end: now + ms, lastSeen: now, intent: "Borrowed time", borrowed: true };
   g.sessions += 1;
   return ms;

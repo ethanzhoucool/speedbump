@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_SETTINGS as S, MIN, matchGroup, isAllowed, freshGroupState, status, startSession, endSession,
   remainingMs, sessionsLeft, pauseSeconds, lengthOptions, emptyState, gs, rollover, loosenings,
-  canBorrow, borrow, requestChange, pendingStatus, HOUR,
+  canBorrow, borrow, requestChange, pendingStatus, HOUR, normalize, cooldownUntil,
 } from "../src/core.ts";
 import type { Settings } from "../src/core.ts";
 
@@ -130,4 +130,25 @@ test("shortening the lock or moving the reset hour counts as looser", () => {
   n.lockHours = 1;
   n.resetHour = 4;
   assert.equal(loosenings(S, n).length, 2);
+});
+
+test("a running cooldown follows the current setting", () => {
+  const g = freshGroupState();
+  startSession(x, g, T0, 15);
+  endSession(x, g, T0 + MIN);
+  const long = { ...x, cooldownMin: 60 };
+  assert.equal(status(long, g, T0 + 30 * MIN), "cooldown");
+  assert.equal(status(x, g, T0 + 30 * MIN), "ready", "lowering it to 15 frees it right away");
+  assert.equal(cooldownUntil(x, g), T0 + 16 * MIN);
+});
+
+test("state saved by 1.0 is upgraded in place", () => {
+  const legacy = { day: "2026-10-29", history: {}, groups: { x: { usedMs: 82_333, session: null, cooldownUntil: T0 + HOUR, attempts: 1, dismissed: 0, sessions: 1 } } };
+  const st = normalize(legacy as never);
+  const g = st.groups.x;
+  assert.equal(g.extraMs, 0);
+  assert.equal(g.cooldownFrom, 0);
+  assert.equal("cooldownUntil" in g, false);
+  assert.deepEqual(st.debt, {});
+  assert.equal(status(x, g, T0), "ready");
 });

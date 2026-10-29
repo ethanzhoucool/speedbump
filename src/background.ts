@@ -1,7 +1,7 @@
 import {
   DEFAULT_SETTINGS, CHALLENGE, MIN, matchGroup, emptyState, gs, rollover, status, startSession, endSession,
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
-  BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus,
+  BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
 } from "./core.ts";
 import type { GateInfo, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
 import type { Message, Replies } from "./messages.ts";
@@ -15,6 +15,7 @@ async function stored(...keys: (keyof Stored)[]): Promise<Stored> {
 }
 
 async function loadSettings(): Promise<Settings> {
+  await ready;
   return (await stored("settings")).settings ?? DEFAULT_SETTINGS;
 }
 
@@ -22,10 +23,10 @@ async function loadSettings(): Promise<Settings> {
 let chain: Promise<unknown> = Promise.resolve();
 function withState<T>(fn: (settings: Settings, st: State, now: number) => T | Promise<T>): Promise<T> {
   const run = chain.then(async () => {
+    await ready;
     const { settings = DEFAULT_SETTINGS, state } = await stored("settings", "state");
     const now = Date.now();
-    const st = state ?? emptyState(now, settings);
-    st.debt ||= {};
+    const st = normalize(state ?? emptyState(now, settings));
     rollover(st, now, settings);
     const result = await fn(settings, st, now);
     await chrome.storage.local.set({ state: st });
@@ -35,21 +36,27 @@ function withState<T>(fn: (settings: Settings, st: State, now: number) => T | Pr
   return run;
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+// Runs every time the worker starts, so an update applies even if onInstalled was missed.
+async function migrate() {
   const { settings } = await stored("settings");
-  if (!settings) await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
+  if (!settings) return chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   // 1.1 lowered every cooldown to 15 min. Bring 1.0 installs in line once, without the lock.
-  else if ((settings.version || 1) < 2) {
+  if ((settings.version || 1) < 2) {
     settings.groups.forEach((g) => { g.cooldownMin = 15; });
     settings.version = 2;
+    settings.lockHours ??= 24;
     await chrome.storage.local.set({ settings });
     await chrome.storage.local.remove("pending");
   }
-  setup();
-});
+}
+
+const ready = migrate();
+
+chrome.runtime.onInstalled.addListener(setup);
 chrome.runtime.onStartup.addListener(setup);
 
-function setup() {
+async function setup() {
+  await ready;
   chrome.alarms.create("tick", { periodInMinutes: 0.5 });
   tick();
 }
@@ -144,7 +151,7 @@ async function updateBadge() {
   const ends = settings.groups.map((gr) => state?.groups?.[gr.id]?.session?.end ?? 0).filter((e) => e > now);
   const text = ends.length ? `${Math.ceil((Math.min(...ends) - now) / MIN)}m` : "";
   chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color: "#1f9d74" });
+  chrome.action.setBadgeBackgroundColor({ color: "#7d6bd6" });
 }
 
 function rows(settings: Settings, st: State, now: number): SummaryRow[] {
@@ -152,7 +159,7 @@ function rows(settings: Settings, st: State, now: number): SummaryRow[] {
     const g = gs(st, group.id);
     return {
       group, status: status(group, g, now), usedMs: usedMs(g, now), remainingMs: remainingMs(group, g, now),
-      sessionsLeft: sessionsLeft(group, g, now), session: g.session, cooldownUntil: g.cooldownUntil,
+      sessionsLeft: sessionsLeft(group, g, now), session: g.session, cooldownUntil: cooldownUntil(group, g),
       attempts: g.attempts, dismissed: g.dismissed, sessions: g.sessions,
       budgetMs: budgetMs(group, g), penaltyMs: g.penaltyMs || 0, borrowedMs: g.borrowedMs || 0,
     };
@@ -174,7 +181,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
         const g = gs(st, group.id);
         return {
           group, now, status: status(group, g, now), usedMs: usedMs(g, now), remainingMs: remainingMs(group, g, now),
-          sessionsLeft: sessionsLeft(group, g, now), cooldownUntil: g.cooldownUntil, attempts: g.attempts,
+          sessionsLeft: sessionsLeft(group, g, now), cooldownUntil: cooldownUntil(group, g), attempts: g.attempts,
           dismissed: g.dismissed, pauseSec: pauseSeconds(settings, g.attempts), options: lengthOptions(group, g, now),
           resetAt: nextResetAt(now, settings.resetHour), replacement: settings.replacement,
           budgetMs: budgetMs(group, g), penaltyMs: g.penaltyMs || 0, borrowedMs: g.borrowedMs || 0,
