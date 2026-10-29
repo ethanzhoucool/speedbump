@@ -38,7 +38,8 @@ function render(data: Summary) {
     const [label, cls] = stateText(r, now);
     const total = Math.min(8, Math.ceil(budget / (r.group.sessionMin * MIN)));
     const done = Math.min(total, r.sessions);
-    const dots = `<span class="dots" title="${done} of ${total} sessions used">${Array.from({ length: total }, (_, i) => `<i class="${i < done ? "used" : ""}"></i>`).join("")}</span>`;
+    // Sessions left on the left, spent ones on the right, so the row drains right to left.
+    const dots = `<span class="dots" title="${done} of ${total} sessions used">${Array.from({ length: total }, (_, i) => `<i class="${i >= total - done ? "used" : ""}"></i>`).join("")}</span>`;
     return `<li class="${r.status === "active" ? "live" : ""}">
       <div class="row"><span class="name"><img class="ico" src="${favicon(`https://${r.group.sites[0] || ""}`)}" alt="">${esc(r.group.name)}</span><span class="state num ${cls}">${label}</span></div>
       <div class="meter ${pct >= 100 ? "full" : ""}"><span style="width:${pct}%"></span></div>
