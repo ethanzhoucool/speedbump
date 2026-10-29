@@ -14,19 +14,31 @@ async function stored(...keys: (keyof Stored)[]): Promise<Stored> {
   return (await chrome.storage.local.get(keys)) as Stored;
 }
 
+// Settings and state live in memory while the worker is awake, so a navigation doesn't wait on storage reads.
+// Settings can change from the options page, so storage changes refresh the copy.
+let settingsCache: Settings | undefined;
+let stateCache: State | undefined;
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.settings) settingsCache = changes.settings.newValue as Settings | undefined;
+});
+
 async function loadSettings(): Promise<Settings> {
   await ready;
-  return (await stored("settings")).settings ?? DEFAULT_SETTINGS;
+  settingsCache ??= (await stored("settings")).settings ?? DEFAULT_SETTINGS;
+  return settingsCache;
 }
 
 // All reads and writes go through this queue so two events never clobber each other's state.
 let chain: Promise<unknown> = Promise.resolve();
 function withState<T>(fn: (settings: Settings, st: State, now: number) => T | Promise<T>): Promise<T> {
   const run = chain.then(async () => {
-    await ready;
-    const { settings = DEFAULT_SETTINGS, state } = await stored("settings", "state");
+    const settings = await loadSettings();
+    // Only withState writes state, so the in-memory copy is always current.
+    stateCache ??= (await stored("state")).state;
     const now = Date.now();
-    const st = normalize(state ?? emptyState(now, settings));
+    const st = normalize(stateCache ?? emptyState(now, settings));
+    stateCache = st;
     rollover(st, now, settings);
     const result = await fn(settings, st, now);
     await chrome.storage.local.set({ state: st });
@@ -146,7 +158,8 @@ function notifyEnd() {
 }
 
 async function updateBadge() {
-  const { settings = DEFAULT_SETTINGS, state } = await stored("settings", "state");
+  const settings = await loadSettings();
+  const state = stateCache ?? (await stored("state")).state;
   const now = Date.now();
   const ends = settings.groups.map((gr) => state?.groups?.[gr.id]?.session?.end ?? 0).filter((e) => e > now);
   const text = ends.length ? `${Math.ceil((Math.min(...ends) - now) / MIN)}m` : "";

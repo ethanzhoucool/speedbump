@@ -33,6 +33,12 @@ const ordinal = (n: number) => {
 let host = "";
 try { host = new URL(target).hostname.replace(/^www\./, ""); } catch {}
 
+// Open the connection to the site while you're on this screen, so going through doesn't start cold.
+try {
+  const link = Object.assign(document.createElement("link"), { rel: "preconnect", href: new URL(target).origin });
+  document.head.append(link);
+} catch {}
+
 function sitePill() {
   return host ? `<div class="site"><img src="${favicon(target)}" alt=""><span>${esc(host)}</span></div>` : "";
 }
