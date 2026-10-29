@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speedbump</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    body { min-height: 100dvh; display: grid; place-items: center; padding: 32px 16px; }
+    main { width: 100%; max-width: 480px; display: grid; gap: 28px; justify-items: center; text-align: center; }
+    .site { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); max-width: 100%; }
+    .site img { width: 16px; height: 16px; border-radius: 4px; }
+    .site span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    h1 { font-size: clamp(28px, 5vw, 38px); font-weight: 700; text-wrap: balance; }
+    .lede { margin-top: 10px; color: var(--muted); text-wrap: pretty; }
+
+    .breath { position: relative; width: 148px; height: 148px; display: grid; place-items: center; }
+    .breath .ring { position: absolute; inset: 0; border-radius: 50%; background: var(--accent-soft); animation: breathe 8s var(--ease) infinite; }
+    .breath .core { position: relative; display: grid; gap: 2px; }
+    .breath .count { font-size: 44px; font-weight: 700; letter-spacing: -0.03em; }
+    .breath .cue { font-size: 12.5px; color: var(--muted); }
+    @keyframes breathe { 0%, 100% { transform: scale(0.62); opacity: 0.7; } 50% { transform: scale(1); opacity: 1; } }
+
+    .stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 20px; font-size: 13px; color: var(--muted); }
+    .stats b { color: var(--text); font-weight: 600; margin-right: 4px; }
+    .stats small { font-size: inherit; }
+
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .alt { font-size: 13.5px; color: var(--muted); background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; font-family: inherit; }
+    .alt:hover { color: var(--text); }
+
+    .setup { width: 100%; display: grid; gap: 18px; text-align: left; animation: rise 0.45s var(--ease); }
+    .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 999px; background: var(--surface-2); }
+    .seg button { border: 0; background: transparent; color: var(--muted); border-radius: 999px; padding: 9px 0; font: 600 13.5px var(--font); cursor: pointer; }
+    .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+    .setup .btn { width: 100%; padding: 13px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .borrow textarea { font-family: var(--font); font-size: 14px; resize: none; }
+    .said { font-weight: 600; color: var(--warn); user-select: none; -webkit-user-select: none; }
+    .borrow .btn { width: 100%; padding: 13px; }
+
+    .big-clock { font-size: 64px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+    .foot { font-size: 13px; color: var(--muted); }
+    .hidden { display: none !important; }
+    main > * { animation: rise 0.5s var(--ease) both; }
+    main > *:nth-child(2) { animation-delay: 0.05s; }
+    main > *:nth-child(3) { animation-delay: 0.1s; }
+    main > *:nth-child(4) { animation-delay: 0.15s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body>
+  <main id="app" aria-live="polite"></main>
+  <script type="module" src="gate.js"></script>
+</body>
+</html>

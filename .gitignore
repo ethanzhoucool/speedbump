@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+*.zip
+
+# Build output (npm run build compiles src/*.ts here so Chrome can load this folder)
+/*.js

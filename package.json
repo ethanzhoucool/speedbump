@@ -1,0 +1,17 @@
+{
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.7",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  },
+  "name": "speedbump",
+  "version": "1.1.0"
+}

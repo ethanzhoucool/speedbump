@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speedbump settings</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    body { padding: 64px 16px 140px; }
+    .wrap { max-width: 920px; margin: 0 auto; display: grid; gap: 48px; }
+    h1 { font-size: 22px; font-weight: 650; }
+    h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 12px; }
+    .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+
+    .notice { padding: 2px 0 2px 14px; border-left: 2px solid var(--warn); font-size: 14px; display: flex; gap: 16px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+    .notice.ready { border-color: var(--accent); }
+    .notice p { margin: 0; }
+    .notice .m { color: var(--muted); }
+    .notice .acts { display: flex; gap: 14px; }
+    .notices { display: grid; gap: 14px; }
+    .notices:empty { display: none; }
+    .link { all: unset; cursor: pointer; font-size: 13.5px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+    .link:hover { color: var(--text); }
+    .link.go { color: var(--accent); }
+
+    .stats { display: flex; flex-wrap: wrap; gap: 6px 28px; font-size: 14px; color: var(--muted); }
+    .stats b { color: var(--text); font-weight: 600; }
+    .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; height: 56px; align-items: end; margin-top: 16px; }
+    .week span { background: var(--surface-2); border-radius: 3px; min-height: 2px; }
+    .week span.today { background: var(--accent); }
+    .week span.borrowed { background: var(--warn); }
+    .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 0 6px 8px; white-space: nowrap; }
+    th.n, td.n { text-align: right; width: 72px; }
+    th.c, td.c { text-align: center; width: 44px; }
+    td { padding: 6px; border-top: 1px solid var(--line); vertical-align: middle; }
+    tr.off td:not(.keep) { opacity: 0.4; }
+    tr.looser td:first-child { box-shadow: inset 2px 0 var(--warn); }
+    td input[type="text"], td input[type="number"] { border: 1px solid transparent; background: transparent; padding: 7px 8px; border-radius: 8px; }
+    td input:hover, td input:focus { border-color: var(--line); background: var(--surface); }
+    td input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+    td input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .name { display: flex; align-items: center; gap: 4px; min-width: 150px; }
+    .name img { width: 16px; height: 16px; border-radius: 4px; margin-left: 4px; flex: none; }
+    .name input { font-weight: 600; }
+    .sites input { font: 13px var(--mono); color: var(--muted); }
+    .sites input:focus { color: var(--text); }
+    input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin: 0; }
+    .x { all: unset; cursor: pointer; color: var(--muted); width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; opacity: 0; }
+    tr:hover .x, .x:focus-visible { opacity: 1; }
+    .x:hover { color: var(--warn); background: var(--surface-2); }
+    .addrow { margin-top: 10px; }
+
+    .general { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 24px; }
+    .general .wide { grid-column: 1 / -1; }
+    .general label { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+    .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+
+    .bar-save { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 160%); display: flex; gap: 14px; align-items: center; padding: 8px 8px 8px 18px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); transition: transform 0.35s var(--ease); font-size: 13.5px; max-width: calc(100vw - 32px); }
+    .bar-save.show { transform: translate(-50%, 0); }
+    .bar-save.looser #saveMsg { color: var(--warn); }
+
+    dialog { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); padding: 24px; max-width: 440px; width: calc(100vw - 32px); box-shadow: var(--shadow); }
+    dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+    dialog h3 { font-size: 17px; margin-bottom: 6px; }
+    dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+    dialog ul { margin: 0 0 18px; padding-left: 18px; font-size: 14px; }
+    dialog .phrase { font-weight: 600; margin-bottom: 8px; user-select: none; -webkit-user-select: none; }
+    dialog .row { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 18px; }
+    #typedCount { margin-right: auto; font-size: 12px; color: var(--muted); }
+
+    @media (max-width: 760px) {
+      thead { display: none; }
+      tr { display: grid; grid-template-columns: repeat(3, 1fr) auto auto auto; gap: 0 4px; border-top: 1px solid var(--line); padding: 6px 0; }
+      td { border: 0; padding: 2px; }
+      td.name, td.sites { grid-column: 1 / -1; }
+      td.n::before { content: attr(data-l); display: block; font-size: 11px; color: var(--muted); text-align: right; padding-right: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Speedbump</h1>
+      <p class="sub" id="lock"></p>
+    </header>
+
+    <div class="notices" id="notices"></div>
+
+    <section>
+      <h2>Last 7 days</h2>
+      <div class="stats num" id="stats"></div>
+      <div class="week" id="week"></div>
+      <div class="days" id="days"></div>
+    </section>
+
+    <section>
+      <h2>Limits</h2>
+      <table>
+        <thead><tr><th>Group</th><th>Sites</th><th class="n">Session</th><th class="n">Per day</th><th class="n">Cooldown</th><th class="c" title="Ask &quot;are you sure?&quot; first">Ask</th><th class="c">On</th><th></th></tr></thead>
+        <tbody id="groups"></tbody>
+      </table>
+      <button class="link addrow" id="add">Add group</button>
+    </section>
+
+    <section>
+      <h2>General</h2>
+      <div class="general">
+        <div><label for="basePause">First pause (s)</label><input type="number" id="basePause" min="0" max="120"></div>
+        <div><label for="stepPause">Added per try (s)</label><input type="number" id="stepPause" min="0" max="60"></div>
+        <div><label for="maxPause">Longest pause (s)</label><input type="number" id="maxPause" min="0" max="300"></div>
+        <div><label for="lockHours">Lock delay (h)</label><input type="number" id="lockHours" min="1" max="168"></div>
+        <div><label for="resetHour">Day starts at (hour)</label><input type="number" id="resetHour" min="0" max="23"></div>
+        <div><label for="repLabel">"Instead" label</label><input type="text" id="repLabel"></div>
+        <div class="wide"><label for="repUrl">"Instead" link</label><input type="text" id="repUrl" placeholder="https://"></div>
+        <div class="wide"><label for="allow">Always allowed, one per line</label><textarea id="allow" rows="3"></textarea></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="bar-save" id="saveBar"><span id="saveMsg"></span><button class="link" id="revert">Discard</button><button class="btn btn-primary btn-small" id="save">Save</button></div>
+
+  <dialog id="challenge">
+    <h3 id="dTitle"></h3>
+    <p id="dLede"></p>
+    <ul id="changes"></ul>
+    <p class="phrase" id="phrase"></p>
+    <input type="text" id="phraseInput" autocomplete="off" spellcheck="false" placeholder="Type the sentence above">
+    <div class="row"><span class="num" id="typedCount"></span><button class="btn btn-primary btn-small" id="cancel">Keep my limits</button><button class="btn btn-ghost btn-small" id="confirm" disabled></button></div>
+  </dialog>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

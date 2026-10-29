@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Speedbump</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    body { width: 340px; padding: 16px; }
+    header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+    header h1 { font-size: 17px; }
+    header a { font-size: 12.5px; color: var(--muted); text-decoration: none; }
+    header a:hover { color: var(--text); }
+    .tally { font-size: 12.5px; color: var(--muted); margin: -8px 0 14px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { padding: 12px 0; border-top: 1px solid var(--line); display: grid; gap: 7px; }
+    li.live .name { color: var(--accent); }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .name { font-weight: 600; font-size: 14px; }
+    .state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .state.on { color: var(--accent); font-weight: 600; }
+    .state.cool { color: var(--warn); }
+    .sub { font-size: 12px; color: var(--muted); }
+    .empty { text-align: center; padding: 28px 8px; color: var(--muted); font-size: 13px; }
+    .dots { display: inline-flex; gap: 4px; margin-right: 6px; vertical-align: 1px; }
+    .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .dots i.used { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+    .ico { width: 16px; height: 16px; border-radius: 4px; vertical-align: -3px; margin-right: 8px; }
+    .debt { color: var(--warn); }
+    .banner { display: block; margin: 0 0 12px; padding-left: 10px; border-left: 2px solid var(--warn); font-size: 12.5px; text-decoration: none; color: var(--text); }
+    .banner:empty { display: none; }
+  </style>
+</head>
+<body>
+  <header><h1>Today</h1><a href="options.html" target="_blank">Settings</a></header>
+  <p class="tally" id="tally"></p>
+  <a class="banner" id="banner" href="options.html" target="_blank"></a>
+  <ul id="list"><li class="empty">Loading</li></ul>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
