@@ -48,12 +48,14 @@ test("three 15 min sessions with a cooldown between each", () => {
   assert.equal(g.sessions, 3);
 });
 
-test("ending early refunds the unused minutes but still cools down", () => {
+test("ending early refunds the unused minutes and shortens the cooldown", () => {
   const g = freshGroupState();
   startSession(x, g, T0, 15);
-  endSession(x, g, T0 + 4 * MIN);
-  assert.equal(remainingMs(x, g, T0 + 4 * MIN), 41 * MIN);
-  assert.equal(status(x, g, T0 + 10 * MIN), "cooldown");
+  endSession(x, g, T0 + 5 * MIN);
+  assert.equal(remainingMs(x, g, T0 + 5 * MIN), 40 * MIN);
+  assert.equal(status(x, g, T0 + 9 * MIN), "cooldown");
+  assert.equal(cooldownUntil(x, g), T0 + 10 * MIN, "5 of 15 min used, so 5 of 15 min cooldown");
+  assert.equal(status(x, g, T0 + 10 * MIN), "ready");
 });
 
 test("session is capped by session length and remaining budget", () => {
@@ -135,11 +137,11 @@ test("shortening the lock or moving the reset hour counts as looser", () => {
 test("a running cooldown follows the current setting", () => {
   const g = freshGroupState();
   startSession(x, g, T0, 15);
-  endSession(x, g, T0 + MIN);
+  endSession(x, g, T0 + 15 * MIN);
   const long = { ...x, cooldownMin: 60 };
-  assert.equal(status(long, g, T0 + 30 * MIN), "cooldown");
-  assert.equal(status(x, g, T0 + 30 * MIN), "ready", "lowering it to 15 frees it right away");
-  assert.equal(cooldownUntil(x, g), T0 + 16 * MIN);
+  assert.equal(status(long, g, T0 + 45 * MIN), "cooldown");
+  assert.equal(status(x, g, T0 + 45 * MIN), "ready", "lowering it to 15 frees it right away");
+  assert.equal(cooldownUntil(x, g), T0 + 30 * MIN);
 });
 
 test("state saved by 1.0 is upgraded in place", () => {
@@ -148,6 +150,7 @@ test("state saved by 1.0 is upgraded in place", () => {
   const g = st.groups.x;
   assert.equal(g.extraMs, 0);
   assert.equal(g.cooldownFrom, 0);
+  assert.equal(g.cooldownScale, 1);
   assert.equal("cooldownUntil" in g, false);
   assert.deepEqual(st.debt, {});
   assert.equal(status(x, g, T0), "ready");

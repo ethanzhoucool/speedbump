@@ -126,7 +126,7 @@ function renderSetup(info: GateInfo, afterPause = false) {
     ${sitePill()}
     <div>
       <h1>${afterPause ? "Okay. Keep it short." : `Start a ${esc(info.group.name)} session`}</h1>
-      <p class="lede">The session ends when time's up, when you end it, or after 2 minutes away from the site. Then a ${info.group.cooldownMin} min cooldown.</p>
+      <p class="lede">The session ends when time's up, when you end it, or after 2 minutes away from the site. Then a cooldown as long as you stayed, up to ${info.group.cooldownMin} min.</p>
     </div>
     <div class="setup">
       <div>
