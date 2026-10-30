@@ -195,7 +195,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
         return {
           group, now, status: status(group, g, now), usedMs: usedMs(g, now), remainingMs: remainingMs(group, g, now),
           sessionsLeft: sessionsLeft(group, g, now), cooldownUntil: cooldownUntil(group, g), attempts: g.attempts,
-          dismissed: g.dismissed, pauseSec: pauseSeconds(settings, g.attempts), options: lengthOptions(group, g, now),
+          dismissed: g.dismissed, pauseSec: pauseSeconds(settings, g.fullSessions), options: lengthOptions(group, g, now),
           resetAt: nextResetAt(now, settings.resetHour), replacement: settings.replacement,
           budgetMs: budgetMs(group, g), penaltyMs: g.penaltyMs || 0, borrowedMs: g.borrowedMs || 0,
           canBorrow: canBorrow(group, g, now), borrow: { ...BORROW, phrase: BORROW_PHRASE },

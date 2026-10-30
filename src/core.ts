@@ -49,10 +49,10 @@ export interface GroupState {
   attempts: number;
   dismissed: number;
   sessions: number;
+  // Sessions today that ran to their full length. Only these lengthen the next pause.
+  fullSessions: number;
   // When the last session ended. The cooldown length is read from the current settings.
   cooldownFrom: number;
-  // Share of a full session the last one used (0 to 1). A short visit earns a short cooldown.
-  cooldownScale: number;
   extraMs: number;
   penaltyMs: number;
   borrowedMs: number;
@@ -200,7 +200,7 @@ export function matchGroup(url: string, settings: Settings): Group | null {
 }
 
 export function freshGroupState(): GroupState {
-  return { usedMs: 0, session: null, cooldownFrom: 0, cooldownScale: 1, attempts: 0, dismissed: 0, sessions: 0, extraMs: 0, penaltyMs: 0, borrowedMs: 0, borrowStartedAt: 0 };
+  return { usedMs: 0, session: null, cooldownFrom: 0, attempts: 0, dismissed: 0, sessions: 0, fullSessions: 0, extraMs: 0, penaltyMs: 0, borrowedMs: 0, borrowStartedAt: 0 };
 }
 
 export function emptyState(now: number, settings: Settings): State {
@@ -256,7 +256,7 @@ export function remainingMs(group: Group, g: GroupState, now: number): number {
 }
 
 export function cooldownUntil(group: Group, g: GroupState): number {
-  return g.cooldownFrom ? g.cooldownFrom + Math.round(group.cooldownMin * MIN * g.cooldownScale) : 0;
+  return g.cooldownFrom ? g.cooldownFrom + group.cooldownMin * MIN : 0;
 }
 
 export function status(group: Group, g: GroupState, now: number): Status {
@@ -271,9 +271,10 @@ export function sessionsLeft(group: Group, g: GroupState, now: number): number {
   return Math.ceil(rem / (group.sessionMin * MIN) - 1e-9);
 }
 
-// Escalating pause: every attempt today adds a few seconds.
-export function pauseSeconds(settings: Settings, attempts: number): number {
-  return Math.min(settings.maxPauseSec, settings.basePauseSec + settings.pauseStepSec * Math.max(0, attempts - 1));
+// Escalating pause: every session today that used all its time adds a few seconds.
+// Backing out or ending early doesn't make the next pause longer.
+export function pauseSeconds(settings: Settings, fullSessions: number): number {
+  return Math.min(settings.maxPauseSec, settings.basePauseSec + settings.pauseStepSec * Math.max(0, fullSessions));
 }
 
 export function lengthOptions(group: Group, g: GroupState, now: number): number[] {
@@ -293,16 +294,14 @@ export function startSession(group: Group, g: GroupState, now: number, minutes: 
   return true;
 }
 
-// Ends a session early or on expiry. Unused minutes go back to the daily pool, and the cooldown
-// shrinks to match: 5 min of a 15 min session means a third of the usual cooldown.
+// Ends a session early or on expiry. Unused minutes go back to the daily pool; the cooldown still applies.
 export function endSession(group: Group, g: GroupState, now: number): boolean {
   if (!g.session) return false;
   const stop = Math.min(now, g.session.end);
-  const spent = Math.max(0, stop - g.session.start);
-  g.usedMs += spent;
+  g.usedMs += Math.max(0, stop - g.session.start);
+  if (stop >= g.session.end) g.fullSessions += 1;
   g.session = null;
   g.cooldownFrom = stop;
-  g.cooldownScale = Math.min(1, spent / (Math.max(1, group.sessionMin) * MIN));
   return true;
 }
 
