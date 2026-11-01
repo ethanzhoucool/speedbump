@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS as S, MIN, matchGroup, isAllowed, freshGroupState, status, startSession, endSession,
   remainingMs, sessionsLeft, pauseSeconds, lengthOptions, emptyState, gs, rollover, loosenings,
   canBorrow, borrow, requestChange, pendingStatus, HOUR, normalize, cooldownUntil,
+  makeAgentProblem, agentAnswer, checkAgentAnswer, agentText,
 } from "../src/core.ts";
 import type { Settings } from "../src/core.ts";
 
@@ -158,4 +159,33 @@ test("state saved by 1.0 is upgraded in place", () => {
   assert.equal("cooldownUntil" in g, false);
   assert.deepEqual(st.debt, {});
   assert.equal(status(x, g, T0), "ready");
+});
+
+test("agent pass: Dirichlet integral, exact fractions in any form", () => {
+  // ∭ xyz over x/2 + y/3 + z/5 ≤ 1 is 2²·3²·5² / 6! = 900/720 = 5/4.
+  const one = { a: 2, b: 3, c: 5, terms: [{ k: 1, p: 1, q: 1, r: 1 }] };
+  assert.deepEqual(agentAnswer(one), [5n, 4n]);
+  assert.ok(checkAgentAnswer(one, "5/4"));
+  assert.ok(checkAgentAnswer(one, " 10 / 8 "));
+  assert.equal(checkAgentAnswer(one, "1.25"), false, "decimals don't count");
+  assert.equal(checkAgentAnswer(one, "5/0"), false);
+  assert.equal(checkAgentAnswer(one, "4/5"), false);
+  // Sums of terms add up.
+  const two = { ...one, terms: [one.terms[0], { k: 3, p: 1, q: 1, r: 1 }] };
+  assert.deepEqual(agentAnswer(two), [5n, 1n]);
+  assert.ok(checkAgentAnswer(two, "5"));
+});
+
+test("agent problems are random and spelled out", () => {
+  let seed = 1;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const pr = makeAgentProblem(rand);
+  assert.equal(pr.terms.length, 5);
+  const { text, latex } = agentText(pr);
+  assert.match(text, new RegExp(`x/${pr.a} \\+ y/${pr.b} \\+ z/${pr.c}`));
+  assert.match(latex, /^\\iiint_T/);
+  const [n, d] = agentAnswer(pr);
+  assert.ok(checkAgentAnswer(pr, `${n}/${d}`));
+  assert.ok(checkAgentAnswer(pr, `${2n * n}/${2n * d}`));
+  assert.notDeepEqual(makeAgentProblem(rand), pr);
 });

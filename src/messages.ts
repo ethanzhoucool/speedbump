@@ -12,11 +12,16 @@ export type Message =
   | { type: "cancelPending" }
   | { type: "applyPending"; challenge: string }
   | { type: "borrowStart"; groupId: string }
-  | { type: "borrow"; groupId: string; reason: string; phrase: string };
+  | { type: "borrow"; groupId: string; reason: string; phrase: string }
+  | { type: "agentProblem"; url: string }
+  | { type: "agentPass"; url: string; answer: string };
 
 export interface PillInfo { groupId: string; name: string; end: number; intent: string }
 
 export interface Ok { ok: boolean; error?: string }
+
+// agent.ts is a classic content script and keeps its own copy of this shape.
+export interface AgentProblemView { name: string; text: string; latex: string; minutes: number; expiresAt: number }
 
 export interface Replies {
   gateInfo: GateInfo | { missing: true };
@@ -30,6 +35,8 @@ export interface Replies {
   applyPending: Ok;
   borrowStart: { ok: false } | { ok: true; startedAt: number };
   borrow: Ok;
+  agentProblem: AgentProblemView | { missing: true };
+  agentPass: Ok;
 }
 
 export function send<M extends Message>(msg: M): Promise<Replies[M["type"]]> {

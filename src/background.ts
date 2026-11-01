@@ -2,8 +2,9 @@ import {
   DEFAULT_SETTINGS, CHALLENGE, MIN, matchGroup, emptyState, gs, rollover, status, startSession, endSession,
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
+  AGENT, makeAgentProblem, agentText, checkAgentAnswer,
 } from "./core.ts";
-import type { GateInfo, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
+import type { AgentProblem, GateInfo, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
 import type { Message, Replies } from "./messages.ts";
 
 const GATE = chrome.runtime.getURL("gate.html");
@@ -64,6 +65,22 @@ async function migrate() {
 
 const ready = migrate();
 
+// Agent passes are per tab and kept apart from State, so they can't move any budget, cooldown or count.
+// storage.session survives the worker sleeping, and content scripts can't read it, so answers stay hidden.
+interface AgentTab { groupId: string; end: number }
+interface AgentAsk { groupId: string; problem: AgentProblem; expiresAt: number }
+interface AgentStore { agentTabs?: Record<string, AgentTab>; agentAsks?: Record<string, AgentAsk> }
+
+async function agentStore(): Promise<Required<AgentStore>> {
+  const s = (await chrome.storage.session.get(["agentTabs", "agentAsks"])) as AgentStore;
+  return { agentTabs: s.agentTabs ?? {}, agentAsks: s.agentAsks ?? {} };
+}
+
+async function agentAllowed(tabId: number, groupId: string): Promise<boolean> {
+  const t = (await agentStore()).agentTabs[tabId];
+  return !!t && t.groupId === groupId && Date.now() < t.end;
+}
+
 chrome.runtime.onInstalled.addListener(setup);
 chrome.runtime.onStartup.addListener(setup);
 
@@ -88,6 +105,7 @@ async function check(tabId: number, url: string | undefined) {
   recent.set(tabId, { url, t: Date.now() });
   const group = matchGroup(url, await loadSettings());
   if (!group) return;
+  if (await agentAllowed(tabId, group.id)) return;
   const redirect = await withState((_s, st, now) => {
     const g = gs(st, group.id);
     const stat = status(group, g, now);
@@ -108,7 +126,14 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (tab?.url) check(tabId, tab.url);
 });
-chrome.tabs.onRemoved.addListener((tabId) => recent.delete(tabId));
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  recent.delete(tabId);
+  const { agentTabs, agentAsks } = await agentStore();
+  if (!(tabId in agentTabs) && !(tabId in agentAsks)) return;
+  delete agentTabs[tabId];
+  delete agentAsks[tabId];
+  await chrome.storage.session.set({ agentTabs, agentAsks });
+});
 
 function armEnd(groupId: string, g: GroupState) {
   if (g.session) chrome.alarms.create(`end:${groupId}`, { when: g.session.end + 500 });
@@ -128,12 +153,14 @@ chrome.alarms.onAlarm.addListener((a) => {
 async function tick() {
   const tabs = await chrome.tabs.query({});
   const settings = await loadSettings();
+  const { agentTabs } = await agentStore();
+  const passed = (t: chrome.tabs.Tab) => (agentTabs[t.id!]?.end ?? 0) > Date.now();
   const kicked = await withState((_s, st, now) => {
     const out: [number, string][] = [];
     for (const group of settings.groups) {
       const g = st.groups[group.id];
       if (!g?.session) continue;
-      const open = tabs.filter((t) => t.url && matchGroup(t.url, settings)?.id === group.id);
+      const open = tabs.filter((t) => t.url && !passed(t) && matchGroup(t.url, settings)?.id === group.id);
       if (now >= g.session.end) {
         endSession(group, g, now);
         out.push(...open.map((t): [number, string] => [t.id!, gateUrl(group.id, t.url!)]));
@@ -147,6 +174,16 @@ async function tick() {
   });
   for (const [id, url] of kicked) chrome.tabs.update(id, { url }).catch(() => {});
   if (kicked.length) notifyEnd();
+  // An expired pass sends its tab to the gate like any other visit.
+  const expired = Object.keys(agentTabs).filter((id) => agentTabs[id].end <= Date.now());
+  if (expired.length) {
+    for (const id of expired) delete agentTabs[id];
+    await chrome.storage.session.set({ agentTabs });
+    for (const id of expired) {
+      const tab = tabs.find((t) => t.id === Number(id));
+      if (tab?.url) { recent.delete(tab.id!); check(tab.id!, tab.url); }
+    }
+  }
   updateBadge();
 }
 
@@ -280,6 +317,36 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
         armEnd(group.id, g);
         return { ok: true };
       }).finally(updateBadge);
+    case "agentProblem": {
+      const tabId = sender.tab?.id;
+      const match = matchGroup(msg.url, settings);
+      if (tabId === undefined || !match) return { missing: true };
+      // Every ask is a fresh problem with a fresh clock, so reloading never buys time.
+      const problem = makeAgentProblem();
+      const expiresAt = Date.now() + AGENT.answerSec * 1000;
+      const { agentAsks } = await agentStore();
+      agentAsks[tabId] = { groupId: match.id, problem, expiresAt };
+      await chrome.storage.session.set({ agentAsks });
+      return { name: match.name, ...agentText(problem), minutes: AGENT.minutes, expiresAt };
+    }
+    case "agentPass": {
+      const tabId = sender.tab?.id;
+      const match = matchGroup(msg.url, settings);
+      if (tabId === undefined || !match) return { ok: false, error: "This site isn't limited" };
+      const { agentTabs, agentAsks } = await agentStore();
+      const ask = agentAsks[tabId];
+      // One answer per problem, right or wrong.
+      delete agentAsks[tabId];
+      let error = "";
+      if (!ask || ask.groupId !== match.id) error = "No problem for this tab";
+      else if (Date.now() > ask.expiresAt + 2000) error = "Time's up";
+      else if (!checkAgentAnswer(ask.problem, msg.answer)) error = "Wrong answer";
+      else agentTabs[tabId] = { groupId: match.id, end: Date.now() + AGENT.minutes * MIN };
+      await chrome.storage.session.set({ agentTabs, agentAsks });
+      if (error) return { ok: false, error };
+      chrome.alarms.create(`agent:${tabId}`, { when: agentTabs[tabId].end + 500 });
+      return { ok: true };
+    }
   }
 }
 

@@ -10,6 +10,12 @@ export const BORROW_PHRASE = "I am taking this time from tomorrow";
 // Once a looser change is ready, it has to be confirmed inside this window or it lapses.
 export const CONFIRM_WINDOW_HOURS = 24;
 export const CHALLENGE = "I want looser limits and I will still want them tomorrow";
+// Claude in Chrome can't read extension pages, so the agent pass lives on a plain web page.
+// Solving a random triple integral unlocks that one tab for a while. It never touches group state, so
+// budgets, cooldowns, pauses and stats stay as they were, and other tabs stay limited.
+// A person has answerSec to retype the problem into something that can solve it and type back a long fraction.
+export const AGENT = { minutes: 15, answerSec: 120 };
+export const AGENT_PAGE = "https://example.com/";
 
 export interface Group {
   id: string;
@@ -320,6 +326,65 @@ export function borrow(group: Group, g: GroupState, now: number): number {
   g.session = { start: now, end: now + ms, lastSeen: now, intent: "Borrowed time", borrowed: true };
   g.sessions += 1;
   return ms;
+}
+
+export interface Term { k: number; p: number; q: number; r: number }
+// The integrand is a sum of monomials k·x^p·y^q·z^r over the tetrahedron x, y, z ≥ 0, x/a + y/b + z/c ≤ 1.
+export interface AgentProblem { a: number; b: number; c: number; terms: Term[] }
+
+export function makeAgentProblem(rand = Math.random): AgentProblem {
+  const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+  const term = (): Term => ({ k: int(2, 19), p: int(1, 7), q: int(1, 7), r: int(1, 7) });
+  return { a: int(2, 9), b: int(2, 9), c: int(2, 9), terms: [term(), term(), term(), term(), term()] };
+}
+
+const fact = (n: number): bigint => {
+  let f = 1n;
+  for (let i = 2n; i <= BigInt(n); i++) f *= i;
+  return f;
+};
+
+const gcd = (a: bigint, b: bigint): bigint => {
+  if (a < 0n) a = -a;
+  while (b) [a, b] = [b, a % b];
+  return a;
+};
+
+// Dirichlet's integral: ∭ x^p y^q z^r over the tetrahedron = a^(p+1) b^(q+1) c^(r+1) p! q! r! / (p+q+r+3)!
+export function agentAnswer(pr: AgentProblem): [bigint, bigint] {
+  let num = 0n, den = 1n;
+  for (const t of pr.terms) {
+    const n = BigInt(t.k) * BigInt(pr.a) ** BigInt(t.p + 1) * BigInt(pr.b) ** BigInt(t.q + 1) * BigInt(pr.c) ** BigInt(t.r + 1) * fact(t.p) * fact(t.q) * fact(t.r);
+    const d = fact(t.p + t.q + t.r + 3);
+    num = num * d + n * den;
+    den *= d;
+    const g = gcd(num, den);
+    num /= g;
+    den /= g;
+  }
+  return [num, den];
+}
+
+// Takes "n/d" or a whole number. Any equivalent fraction counts.
+export function checkAgentAnswer(pr: AgentProblem, input: string): boolean {
+  const m = input.replace(/[\s,]/g, "").match(/^(-?\d+)(?:\/(\d+))?$/);
+  if (!m) return false;
+  const n = BigInt(m[1]), d = BigInt(m[2] ?? "1");
+  if (d === 0n) return false;
+  const [an, ad] = agentAnswer(pr);
+  return n * ad === an * d;
+}
+
+const SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+const pow = (v: string, e: number) => (e === 1 ? v : v + String(e).replace(/\d/g, (c) => SUP[Number(c)]));
+
+export function agentText(pr: AgentProblem): { text: string; latex: string } {
+  const poly = pr.terms.map((t) => `${t.k}${pow("x", t.p)}${pow("y", t.q)}${pow("z", t.r)}`).join(" + ");
+  const tex = pr.terms.map((t) => `${t.k}x^{${t.p}}y^{${t.q}}z^{${t.r}}`).join(" + ");
+  return {
+    text: `Compute ∭_T (${poly}) dV, where T = { x, y, z ≥ 0 : x/${pr.a} + y/${pr.b} + z/${pr.c} ≤ 1 }. Give the exact value as a fraction n/d.`,
+    latex: `\\iiint_T \\left(${tex}\\right)\\,dV,\\quad T=\\{x,y,z\\ge 0:\\ \\tfrac{x}{${pr.a}}+\\tfrac{y}{${pr.b}}+\\tfrac{z}{${pr.c}}\\le 1\\}`,
+  };
 }
 
 // Key order can change on a storage round trip, so compare settings with sorted keys.
