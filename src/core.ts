@@ -153,16 +153,28 @@ export const DEFAULT_SETTINGS: Settings = {
   ],
 };
 
+const formatDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// The day starts when the local clock reaches resetHour. Reading the clock, rather than subtracting
+// resetHour hours, keeps that true on the 23 and 25 hour days when daylight saving starts or ends,
+// so the day turns over at the same moment nextResetAt() reports.
 export function dayKey(now: number, resetHour = 0): string {
-  const d = new Date(now - resetHour * HOUR);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const d = new Date(now);
+  return formatDay(d.getHours() < resetHour ? new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 12) : d);
+}
+
+// The day `delta` calendar days away from a dayKey() string.
+export function shiftDay(key: string, delta: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return formatDay(new Date(y, m - 1, d + delta, 12));
 }
 
 export function nextResetAt(now: number, resetHour = 0): number {
   const d = new Date(now);
-  d.setHours(resetHour, 0, 0, 0);
-  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-  return d.getTime();
+  // Build each candidate from the date, so an hour skipped by DST today (02:00 becomes 03:00) doesn't
+  // carry over and make tomorrow's reset 03:00 as well.
+  const at = (offset: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + offset, resetHour).getTime();
+  return at(0) > now ? at(0) : at(1);
 }
 
 interface Parsed { host: string; rest: string }
