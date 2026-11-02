@@ -305,6 +305,23 @@ export function endSession(group: Group, g: GroupState, now: number): boolean {
   return true;
 }
 
+// Ends a session that ran out, or that nobody has been on for longer than the grace period. The worker
+// sleeps, and so does the laptop, so this can run long after the fact: a session left unseen ends when it
+// was last seen, not when its timer would have run out. Run it before marking a session as seen.
+export function settle(group: Group, g: GroupState, now: number, graceMs: number): "expired" | "abandoned" | null {
+  const s = g.session;
+  if (!s) return null;
+  if (s.lastSeen + graceMs < Math.min(now, s.end)) {
+    endSession(group, g, s.lastSeen);
+    return "abandoned";
+  }
+  if (now >= s.end) {
+    endSession(group, g, now);
+    return "expired";
+  }
+  return null;
+}
+
 export function canBorrow(group: Group, g: GroupState, now: number): boolean {
   const s = status(group, g, now);
   return (s === "cooldown" || s === "exhausted") && !g.borrowedMs;
