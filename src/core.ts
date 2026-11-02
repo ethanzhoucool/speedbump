@@ -251,8 +251,11 @@ export function budgetMs(group: Group, g: GroupState): number {
   return Math.max(0, group.dailyMin * MIN + (g.extraMs || 0) - (g.penaltyMs || 0));
 }
 
+// Session lengths are whole minutes, so less than one left (say, after ending a session a few seconds
+// early) can't start anything and counts as none. Otherwise the gate offers a session with no length.
 export function remainingMs(group: Group, g: GroupState, now: number): number {
-  return Math.max(0, budgetMs(group, g) - usedMs(g, now));
+  const left = budgetMs(group, g) - usedMs(g, now);
+  return left >= MIN ? left : 0;
 }
 
 export function cooldownUntil(group: Group, g: GroupState): number {
@@ -268,7 +271,7 @@ export function status(group: Group, g: GroupState, now: number): Status {
 
 export function sessionsLeft(group: Group, g: GroupState, now: number): number {
   const rem = remainingMs(group, g, now);
-  return Math.ceil(rem / (group.sessionMin * MIN) - 1e-9);
+  return Math.max(0, Math.ceil(rem / (group.sessionMin * MIN) - 1e-9));
 }
 
 // Escalating pause: every session today that used all its time adds a few seconds.
@@ -285,7 +288,8 @@ export function lengthOptions(group: Group, g: GroupState, now: number): number[
 }
 
 export function startSession(group: Group, g: GroupState, now: number, minutes: number, intent = ""): boolean {
-  if (status(group, g, now) !== "ready") return false;
+  // The length comes from a page message; a missing one would make a session that never ends.
+  if (!(minutes > 0) || status(group, g, now) !== "ready") return false;
   const planned = Math.min(minutes, group.sessionMin) * MIN;
   const ms = Math.min(planned, remainingMs(group, g, now));
   if (ms <= 0) return false;
