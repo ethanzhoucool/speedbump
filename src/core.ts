@@ -411,10 +411,23 @@ export function loosenings(oldS: Settings, newS: Settings): string[] {
     const removed = o.sites.filter((s) => !n.sites.includes(s));
     if (removed.length) out.push(`"${o.name}" unblocks ${removed.join(", ")}`);
   }
+  // A site can also loosen by moving. The first enabled group that lists it wins, so adding it to an
+  // earlier group with easier limits (or switching such a group back on) hands it those limits.
+  for (const site of new Set([...oldS.groups, ...newS.groups].flatMap((g) => g.sites))) {
+    const url = `https://${site.trim().replace(/^https?:\/\//i, "").replace(/^\*?\.?/, "")}`;
+    const before = matchGroup(url, oldS);
+    const after = matchGroup(url, newS);
+    if (before && after && before.id !== after.id && easier(before, after)) out.push(`"${site}" moves from "${before.name}" to "${after.name}"`);
+  }
   const added = newS.allowlist.filter((a) => !oldS.allowlist.includes(a));
   if (added.length) out.push(`Always allow ${added.join(", ")}`);
   if (newS.basePauseSec < oldS.basePauseSec || newS.maxPauseSec < oldS.maxPauseSec || newS.pauseStepSec < oldS.pauseStepSec) out.push("Shorter pause");
   if ((newS.lockHours ?? 24) < (oldS.lockHours ?? 24)) out.push(`Lock delay ${oldS.lockHours ?? 24} to ${newS.lockHours} hours`);
   if (newS.resetHour !== oldS.resetHour) out.push(`New day starts at ${newS.resetHour}:00`);
   return out;
+}
+
+// True if group b is easier than group a on any limit.
+function easier(a: Group, b: Group): boolean {
+  return b.dailyMin > a.dailyMin || b.sessionMin > a.sessionMin || b.cooldownMin < a.cooldownMin || (a.confirm && !b.confirm);
 }
