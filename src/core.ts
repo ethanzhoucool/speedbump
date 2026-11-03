@@ -199,6 +199,21 @@ export function matchGroup(url: string, settings: Settings): Group | null {
   return settings.groups.find((g) => g.enabled && g.sites.some((s) => siteMatches(s, p))) || null;
 }
 
+export interface TabLike { id?: number; url?: string; active?: boolean; status?: string }
+
+// Tabs in front that show a limited site while no session is running, e.g. right after End or when a
+// new day starts. These get treated like a fresh visit. Background tabs are checked when they come forward,
+// and loading tabs are left to the navigation listeners.
+export function tabsWithoutSession<T extends TabLike>(tabs: T[], settings: Settings, st: State, now: number): T[] {
+  return tabs.filter((t) => {
+    if (!t.active || !t.url || t.status === "loading") return false;
+    const group = matchGroup(t.url, settings);
+    if (!group) return false;
+    const s = st.groups[group.id]?.session;
+    return !(s && now < s.end);
+  });
+}
+
 export function freshGroupState(): GroupState {
   return { usedMs: 0, session: null, cooldownFrom: 0, attempts: 0, dismissed: 0, sessions: 0, fullSessions: 0, extraMs: 0, penaltyMs: 0, borrowedMs: 0, borrowStartedAt: 0 };
 }

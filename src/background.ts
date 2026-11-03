@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS, CHALLENGE, MIN, matchGroup, emptyState, gs, rollover, status, startSession, endSession,
+  tabsWithoutSession,
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
 } from "./core.ts";
@@ -128,7 +129,7 @@ chrome.alarms.onAlarm.addListener((a) => {
 async function tick() {
   const tabs = await chrome.tabs.query({});
   const settings = await loadSettings();
-  const kicked = await withState((_s, st, now) => {
+  const { kicked, loose } = await withState((_s, st, now) => {
     const out: [number, string][] = [];
     for (const group of settings.groups) {
       const g = st.groups[group.id];
@@ -143,10 +144,15 @@ async function tick() {
         endSession(group, g, g.session.lastSeen);
       }
     }
-    return out;
+    // A site still in front with no session (End was pressed, or the day rolled over) would otherwise
+    // stay usable until its next navigation, which a feed or a video may never make.
+    const loose = tabsWithoutSession(tabs, settings, st, now).filter((t) => !out.some(([id]) => id === t.id));
+    return { kicked: out, loose };
   });
   for (const [id, url] of kicked) chrome.tabs.update(id, { url }).catch(() => {});
   if (kicked.length) notifyEnd();
+  // Not a repeat of the navigation event that `recent` dedupes, so let it through.
+  for (const t of loose) { recent.delete(t.id!); check(t.id!, t.url!); }
   updateBadge();
 }
 
