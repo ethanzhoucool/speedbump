@@ -199,6 +199,21 @@ export function matchGroup(url: string, settings: Settings): Group | null {
   return settings.groups.find((g) => g.enabled && g.sites.some((s) => siteMatches(s, p))) || null;
 }
 
+export interface TabLike { id?: number; url?: string; active?: boolean; status?: string }
+
+// Tabs in front that show a limited site while no session is running, e.g. right after End or when a
+// new day starts. These get treated like a fresh visit. Background tabs are checked when they come forward,
+// and loading tabs are left to the navigation listeners.
+export function tabsWithoutSession<T extends TabLike>(tabs: T[], settings: Settings, st: State, now: number): T[] {
+  return tabs.filter((t) => {
+    if (!t.active || !t.url || t.status === "loading") return false;
+    const group = matchGroup(t.url, settings);
+    if (!group) return false;
+    const s = st.groups[group.id]?.session;
+    return !(s && now < s.end);
+  });
+}
+
 export function freshGroupState(): GroupState {
   return { usedMs: 0, session: null, cooldownFrom: 0, attempts: 0, dismissed: 0, sessions: 0, fullSessions: 0, extraMs: 0, penaltyMs: 0, borrowedMs: 0, borrowStartedAt: 0 };
 }
@@ -251,8 +266,11 @@ export function budgetMs(group: Group, g: GroupState): number {
   return Math.max(0, group.dailyMin * MIN + (g.extraMs || 0) - (g.penaltyMs || 0));
 }
 
+// Session lengths are whole minutes, so less than one left (say, after ending a session a few seconds
+// early) can't start anything and counts as none. Otherwise the gate offers a session with no length.
 export function remainingMs(group: Group, g: GroupState, now: number): number {
-  return Math.max(0, budgetMs(group, g) - usedMs(g, now));
+  const left = budgetMs(group, g) - usedMs(g, now);
+  return left >= MIN ? left : 0;
 }
 
 export function cooldownUntil(group: Group, g: GroupState): number {
@@ -268,7 +286,7 @@ export function status(group: Group, g: GroupState, now: number): Status {
 
 export function sessionsLeft(group: Group, g: GroupState, now: number): number {
   const rem = remainingMs(group, g, now);
-  return Math.ceil(rem / (group.sessionMin * MIN) - 1e-9);
+  return Math.max(0, Math.ceil(rem / (group.sessionMin * MIN) - 1e-9));
 }
 
 // Escalating pause: every session today that used all its time adds a few seconds.
@@ -285,7 +303,8 @@ export function lengthOptions(group: Group, g: GroupState, now: number): number[
 }
 
 export function startSession(group: Group, g: GroupState, now: number, minutes: number, intent = ""): boolean {
-  if (status(group, g, now) !== "ready") return false;
+  // The length comes from a page message; a missing one would make a session that never ends.
+  if (!(minutes > 0) || status(group, g, now) !== "ready") return false;
   const planned = Math.min(minutes, group.sessionMin) * MIN;
   const ms = Math.min(planned, remainingMs(group, g, now));
   if (ms <= 0) return false;
@@ -303,6 +322,23 @@ export function endSession(group: Group, g: GroupState, now: number): boolean {
   g.session = null;
   g.cooldownFrom = stop;
   return true;
+}
+
+// Ends a session that ran out, or that nobody has been on for longer than the grace period. The worker
+// sleeps, and so does the laptop, so this can run long after the fact: a session left unseen ends when it
+// was last seen, not when its timer would have run out. Run it before marking a session as seen.
+export function settle(group: Group, g: GroupState, now: number, graceMs: number): "expired" | "abandoned" | null {
+  const s = g.session;
+  if (!s) return null;
+  if (s.lastSeen + graceMs < Math.min(now, s.end)) {
+    endSession(group, g, s.lastSeen);
+    return "abandoned";
+  }
+  if (now >= s.end) {
+    endSession(group, g, now);
+    return "expired";
+  }
+  return null;
 }
 
 export function canBorrow(group: Group, g: GroupState, now: number): boolean {
