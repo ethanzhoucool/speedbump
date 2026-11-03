@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, CHALLENGE, MIN, HOUR, loosenings } from "./core.ts";
+import { DEFAULT_SETTINGS, CHALLENGE, MIN, loosenings, shiftDay } from "./core.ts";
 import type { Group, Settings, Summary } from "./core.ts";
 import { send } from "./messages.ts";
 import { $, esc, favicon, blockPaste } from "./dom.ts";
@@ -214,9 +214,11 @@ confirmBtn.addEventListener("click", async () => {
 
 function renderStats(data: Summary) {
   const days = [];
+  // Count back from the worker's day by the calendar. Steps of 24 h repeat or skip a day around DST.
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86_400_000 - (saved.resetHour || 0) * HOUR);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const key = shiftDay(data.day, -i);
+    const [y, m, dd] = key.split("-").map(Number);
+    const d = new Date(y, m - 1, dd, 12);
     const isToday = key === data.day;
     const vals = isToday ? data.rows : Object.values(data.history[key] || {});
     days.push({
