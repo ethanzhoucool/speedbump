@@ -3,8 +3,9 @@ import {
   tabsWithoutSession,
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
+  settle,
 } from "./core.ts";
-import type { GateInfo, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
+import type { GateInfo, Group, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
 import type { Message, Replies } from "./messages.ts";
 
 const GATE = chrome.runtime.getURL("gate.html");
@@ -89,8 +90,8 @@ async function check(tabId: number, url: string | undefined) {
   recent.set(tabId, { url, t: Date.now() });
   const group = matchGroup(url, await loadSettings());
   if (!group) return;
-  const redirect = await withState((_s, st, now) => {
-    const g = gs(st, group.id);
+  const redirect = await withState((s, st, now) => {
+    const g = live(st, group, s, now);
     const stat = status(group, g, now);
     if (stat === "active") { g.session!.lastSeen = now; return false; }
     if (stat === "ready" && !group.confirm) { startSession(group, g, now, group.sessionMin); armEnd(group.id, g); return false; }
@@ -110,6 +111,14 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   if (tab?.url) check(tabId, tab.url);
 });
 chrome.tabs.onRemoved.addListener((tabId) => recent.delete(tabId));
+
+// A group's state with any session that ran out or was left behind (while the worker or the laptop
+// slept) settled first, so its time counts and its cooldown starts before anything reads the status.
+function live(st: State, group: Group, settings: Settings, now: number): GroupState {
+  const g = gs(st, group.id);
+  settle(group, g, now, settings.idleGraceMin * MIN);
+  return g;
+}
 
 function armEnd(groupId: string, g: GroupState) {
   if (g.session) chrome.alarms.create(`end:${groupId}`, { when: g.session.end + 500 });
@@ -135,14 +144,11 @@ async function tick() {
       const g = st.groups[group.id];
       if (!g?.session) continue;
       const open = tabs.filter((t) => t.url && matchGroup(t.url, settings)?.id === group.id);
-      if (now >= g.session.end) {
-        endSession(group, g, now);
-        out.push(...open.map((t): [number, string] => [t.id!, gateUrl(group.id, t.url!)]));
-      } else if (open.some((t) => t.active)) {
-        g.session.lastSeen = now;
-      } else if (now - g.session.lastSeen > settings.idleGraceMin * MIN) {
-        endSession(group, g, g.session.lastSeen);
-      }
+      // Settle before marking the session seen. After a sleep the tab is still in front, and marking it
+      // seen first would charge the whole time away as used.
+      const ended = settle(group, g, now, settings.idleGraceMin * MIN);
+      if (ended === "expired") out.push(...open.map((t): [number, string] => [t.id!, gateUrl(group.id, t.url!)]));
+      else if (!ended && open.some((t) => t.active)) g.session.lastSeen = now;
     }
     // A site still in front with no session (End was pressed, or the day rolled over) would otherwise
     // stay usable until its next navigation, which a feed or a video may never make.
@@ -197,7 +203,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
     case "gateInfo":
       if (!group) return { missing: true };
       return withState((_s, st, now): GateInfo => {
-        const g = gs(st, group.id);
+        const g = live(st, group, settings, now);
         return {
           group, now, status: status(group, g, now), usedMs: usedMs(g, now), remainingMs: remainingMs(group, g, now),
           sessionsLeft: sessionsLeft(group, g, now), cooldownUntil: cooldownUntil(group, g), attempts: g.attempts,
@@ -210,7 +216,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
     case "start":
       if (!group) return { ok: false };
       return withState((_s, st, now) => {
-        const g = gs(st, group.id);
+        const g = live(st, group, settings, now);
         const ok = startSession(group, g, now, msg.minutes, msg.intent || "");
         if (ok) armEnd(group.id, g);
         return { ok };
@@ -268,7 +274,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
     case "borrowStart":
       if (!group) return { ok: false };
       return withState((_s, st, now) => {
-        const g = gs(st, group.id);
+        const g = live(st, group, settings, now);
         if (!canBorrow(group, g, now)) return { ok: false as const };
         if (!g.borrowStartedAt || now - g.borrowStartedAt > 15 * MIN) g.borrowStartedAt = now;
         return { ok: true as const, startedAt: g.borrowStartedAt };
@@ -276,7 +282,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
     case "borrow":
       if (!group) return { ok: false };
       return withState((_s, st, now) => {
-        const g = gs(st, group.id);
+        const g = live(st, group, settings, now);
         const waited = now - (g.borrowStartedAt || now) >= (BORROW.waitSec - 2) * 1000;
         if (!waited || msg.phrase !== BORROW_PHRASE || (msg.reason || "").trim().length < BORROW.minReason) return { ok: false };
         const ms = borrow(group, g, now);
