@@ -2,6 +2,7 @@ import {
   DEFAULT_SETTINGS, CHALLENGE, MIN, matchGroup, emptyState, gs, rollover, status, startSession, endSession,
   tabsWithoutSession,
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
+  clampSession,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
   settle,
 } from "./core.ts";
@@ -42,6 +43,11 @@ function withState<T>(fn: (settings: Settings, st: State, now: number) => T | Pr
     const st = normalize(stateCache ?? emptyState(now, settings));
     stateCache = st;
     rollover(st, now, settings);
+    // Stricter rules apply to a session that's already running, too.
+    for (const group of settings.groups) {
+      const g = st.groups[group.id];
+      if (g && clampSession(group, g, now)) armEnd(group.id, g);
+    }
     const result = await fn(settings, st, now);
     await chrome.storage.local.set({ state: st });
     return result;
@@ -248,6 +254,8 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       const looser = loosenings(settings, msg.settings);
       if (!looser.length) {
         await chrome.storage.local.set({ settings: msg.settings });
+        // Don't wait for storage.onChanged: the tick right after should already see the new rules.
+        settingsCache = msg.settings;
         tick();
         return { ok: true };
       }
@@ -267,6 +275,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       if (pending?.status !== "ready") return { ok: false, error: "Not ready" };
       if (msg.challenge !== CHALLENGE) return { ok: false, error: "Wrong sentence" };
       await chrome.storage.local.set({ settings: pending.settings });
+      settingsCache = pending.settings;
       await chrome.storage.local.remove("pending");
       tick();
       return { ok: true };

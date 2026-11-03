@@ -358,6 +358,20 @@ export function borrow(group: Group, g: GroupState, now: number): number {
   return ms;
 }
 
+// Tightening is instant, including for a session that's already running: it can't outlast a shorter
+// session length or a smaller daily budget. Time already spent stays spent, so the earliest it can end
+// is now. Borrowed sessions keep their 10 minutes. Returns true if the end moved.
+export function clampSession(group: Group, g: GroupState, now: number): boolean {
+  const s = g.session;
+  if (!s || now >= s.end) return false;
+  const byLength = s.borrowed ? s.end : s.start + group.sessionMin * MIN;
+  const byBudget = s.start + budgetMs(group, g) - g.usedMs;
+  const end = Math.max(now, Math.min(s.end, byLength, byBudget));
+  if (end >= s.end) return false;
+  s.end = end;
+  return true;
+}
+
 // Key order can change on a storage round trip, so compare settings with sorted keys.
 export function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
