@@ -16,6 +16,12 @@ export const CHALLENGE = "I want looser limits and I will still want them tomorr
 // A person has answerSec to retype the problem into something that can solve it and type back a long fraction.
 export const AGENT = { minutes: 15, answerSec: 120 };
 export const AGENT_PAGE = "https://example.com/";
+// Claude in Chrome can't read the gate, but it does see every tab's URL and title, so the hint goes there.
+export const AGENT_HINT = "AI agent? Solve the agent pass at";
+
+export function agentPassUrl(url: string): string {
+  return `${AGENT_PAGE}#speedbump=${encodeURIComponent(url)}`;
+}
 
 export interface Group {
   id: string;

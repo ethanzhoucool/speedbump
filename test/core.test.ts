@@ -5,7 +5,7 @@ import {
   DEFAULT_SETTINGS as S, MIN, matchGroup, isAllowed, freshGroupState, status, startSession, endSession,
   remainingMs, sessionsLeft, pauseSeconds, lengthOptions, emptyState, gs, rollover, loosenings,
   canBorrow, borrow, requestChange, pendingStatus, HOUR, normalize, cooldownUntil,
-  makeAgentProblem, agentAnswer, checkAgentAnswer, agentText,
+  makeAgentProblem, agentAnswer, checkAgentAnswer, agentText, agentPassUrl,
 } from "../src/core.ts";
 import type { Settings } from "../src/core.ts";
 
@@ -188,4 +188,10 @@ test("agent problems are random and spelled out", () => {
   assert.ok(checkAgentAnswer(pr, `${n}/${d}`));
   assert.ok(checkAgentAnswer(pr, `${2n * n}/${2n * d}`));
   assert.notDeepEqual(makeAgentProblem(rand), pr);
+});
+
+test("agent pass URL round-trips the target", () => {
+  const u = agentPassUrl("https://x.com/eyonjang?a=1&b=2");
+  assert.equal(u, "https://example.com/#speedbump=https%3A%2F%2Fx.com%2Feyonjang%3Fa%3D1%26b%3D2");
+  assert.equal(decodeURIComponent(u.split("#speedbump=")[1]), "https://x.com/eyonjang?a=1&b=2");
 });

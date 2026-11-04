@@ -1,4 +1,4 @@
-import { MIN } from "./core.ts";
+import { MIN, AGENT_HINT, agentPassUrl } from "./core.ts";
 import type { GateInfo } from "./core.ts";
 import { send as rawSend } from "./messages.ts";
 import type { Message, Replies } from "./messages.ts";
@@ -10,6 +10,9 @@ const params = new URLSearchParams(location.search);
 const groupId = params.get("g") || "";
 const target = params.get("u") || "";
 const app = $("app");
+// Agents only get this page's URL and title, so the title carries the way in. A person sees a long tab name.
+const agentTitle = (name: string) => `${name} · Speedbump · ${AGENT_HINT} ${agentPassUrl(target)}`;
+document.title = agentTitle("Limited");
 // Every gate message is about this page's group, so fill groupId in.
 function send<T extends GroupMessage["type"]>(msg: Omit<Extract<GroupMessage, { type: T }>, "groupId"> & { type: T }): Promise<Replies[T]> {
   return rawSend({ ...msg, groupId } as GroupMessage) as Promise<Replies[T]>;
@@ -78,7 +81,7 @@ async function load() {
     app.innerHTML = `<h1>This site isn't limited anymore</h1><a class="btn btn-primary" href="${esc(target)}">Go to ${esc(host)}</a>`;
     return;
   }
-  document.title = `${info.group.name} · Speedbump`;
+  document.title = agentTitle(info.group.name);
   if (info.status === "active") return location.replace(target);
   const screens = { ready: info.group.confirm ? renderPause : renderSetup, cooldown: renderCooldown, exhausted: renderExhausted };
   screens[info.status](info);
