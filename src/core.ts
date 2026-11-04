@@ -172,16 +172,28 @@ export const DEFAULT_SETTINGS: Settings = {
   ],
 };
 
+const formatDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// The day starts when the local clock reaches resetHour. Reading the clock, rather than subtracting
+// resetHour hours, keeps that true on the 23 and 25 hour days when daylight saving starts or ends,
+// so the day turns over at the same moment nextResetAt() reports.
 export function dayKey(now: number, resetHour = 0): string {
-  const d = new Date(now - resetHour * HOUR);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const d = new Date(now);
+  return formatDay(d.getHours() < resetHour ? new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 12) : d);
+}
+
+// The day `delta` calendar days away from a dayKey() string.
+export function shiftDay(key: string, delta: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return formatDay(new Date(y, m - 1, d + delta, 12));
 }
 
 export function nextResetAt(now: number, resetHour = 0): number {
   const d = new Date(now);
-  d.setHours(resetHour, 0, 0, 0);
-  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-  return d.getTime();
+  // Build each candidate from the date, so an hour skipped by DST today (02:00 becomes 03:00) doesn't
+  // carry over and make tomorrow's reset 03:00 as well.
+  const at = (offset: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + offset, resetHour).getTime();
+  return at(0) > now ? at(0) : at(1);
 }
 
 interface Parsed { host: string; rest: string }
@@ -216,6 +228,21 @@ export function matchGroup(url: string, settings: Settings): Group | null {
   const p = parse(url);
   if (!p || isAllowed(url, settings)) return null;
   return settings.groups.find((g) => g.enabled && g.sites.some((s) => siteMatches(s, p))) || null;
+}
+
+export interface TabLike { id?: number; url?: string; active?: boolean; status?: string }
+
+// Tabs in front that show a limited site while no session is running, e.g. right after End or when a
+// new day starts. These get treated like a fresh visit. Background tabs are checked when they come forward,
+// and loading tabs are left to the navigation listeners.
+export function tabsWithoutSession<T extends TabLike>(tabs: T[], settings: Settings, st: State, now: number): T[] {
+  return tabs.filter((t) => {
+    if (!t.active || !t.url || t.status === "loading") return false;
+    const group = matchGroup(t.url, settings);
+    if (!group) return false;
+    const s = st.groups[group.id]?.session;
+    return !(s && now < s.end);
+  });
 }
 
 export function freshGroupState(): GroupState {
@@ -271,8 +298,11 @@ export function budgetMs(group: Group, g: GroupState): number {
   return Math.max(0, group.dailyMin * MIN + (g.extraMs || 0) - (g.penaltyMs || 0));
 }
 
+// Session lengths are whole minutes, so less than one left (say, after ending a session a few seconds
+// early) can't start anything and counts as none. Otherwise the gate offers a session with no length.
 export function remainingMs(group: Group, g: GroupState, now: number): number {
-  return Math.max(0, budgetMs(group, g) - usedMs(g, now));
+  const left = budgetMs(group, g) - usedMs(g, now);
+  return left >= MIN ? left : 0;
 }
 
 export function cooldownUntil(group: Group, g: GroupState): number {
@@ -288,7 +318,7 @@ export function status(group: Group, g: GroupState, now: number): Status {
 
 export function sessionsLeft(group: Group, g: GroupState, now: number): number {
   const rem = remainingMs(group, g, now);
-  return Math.ceil(rem / (group.sessionMin * MIN) - 1e-9);
+  return Math.max(0, Math.ceil(rem / (group.sessionMin * MIN) - 1e-9));
 }
 
 // Escalating pause: every session today that used all its time adds a few seconds.
@@ -305,7 +335,8 @@ export function lengthOptions(group: Group, g: GroupState, now: number): number[
 }
 
 export function startSession(group: Group, g: GroupState, now: number, minutes: number, intent = ""): boolean {
-  if (status(group, g, now) !== "ready") return false;
+  // The length comes from a page message; a missing one would make a session that never ends.
+  if (!(minutes > 0) || status(group, g, now) !== "ready") return false;
   const planned = Math.min(minutes, group.sessionMin) * MIN;
   const ms = Math.min(planned, remainingMs(group, g, now));
   if (ms <= 0) return false;
@@ -323,6 +354,23 @@ export function endSession(group: Group, g: GroupState, now: number): boolean {
   g.session = null;
   g.cooldownFrom = stop;
   return true;
+}
+
+// Ends a session that ran out, or that nobody has been on for longer than the grace period. The worker
+// sleeps, and so does the laptop, so this can run long after the fact: a session left unseen ends when it
+// was last seen, not when its timer would have run out. Run it before marking a session as seen.
+export function settle(group: Group, g: GroupState, now: number, graceMs: number): "expired" | "abandoned" | null {
+  const s = g.session;
+  if (!s) return null;
+  if (s.lastSeen + graceMs < Math.min(now, s.end)) {
+    endSession(group, g, s.lastSeen);
+    return "abandoned";
+  }
+  if (now >= s.end) {
+    endSession(group, g, now);
+    return "expired";
+  }
+  return null;
 }
 
 export function canBorrow(group: Group, g: GroupState, now: number): boolean {
@@ -346,13 +394,16 @@ export function nuclearOn(state: Pick<State, "nuclearUntil"> | undefined, now: n
   return (state?.nuclearUntil ?? 0) > now;
 }
 
-// Running sessions end the usual way, so unused minutes go back. Starting again can only push the end out.
+// Running sessions end the usual way, so unused minutes go back and one left behind is only charged up to
+// when it was last seen. Starting again can only push the end out.
 export function startNuclear(state: State, settings: Settings, now: number, minutes: number): number {
   const min = Math.min(NUCLEAR.maxMin, Math.max(1, Math.round(minutes) || NUCLEAR.defaultMin));
   state.nuclearUntil = Math.max(state.nuclearUntil, now + min * MIN);
   for (const group of settings.groups) {
     const g = state.groups[group.id];
-    if (g) endSession(group, g, now);
+    if (!g) continue;
+    settle(group, g, now, settings.idleGraceMin * MIN);
+    endSession(group, g, now);
   }
   return state.nuclearUntil;
 }
@@ -416,6 +467,20 @@ export function agentText(pr: AgentProblem): { text: string; latex: string } {
   };
 }
 
+// Tightening is instant, including for a session that's already running: it can't outlast a shorter
+// session length or a smaller daily budget. Time already spent stays spent, so the earliest it can end
+// is now. Borrowed sessions keep their 10 minutes. Returns true if the end moved.
+export function clampSession(group: Group, g: GroupState, now: number): boolean {
+  const s = g.session;
+  if (!s || now >= s.end) return false;
+  const byLength = s.borrowed ? s.end : s.start + group.sessionMin * MIN;
+  const byBudget = s.start + budgetMs(group, g) - g.usedMs;
+  const end = Math.max(now, Math.min(s.end, byLength, byBudget));
+  if (end >= s.end) return false;
+  s.end = end;
+  return true;
+}
+
 // Key order can change on a storage round trip, so compare settings with sorted keys.
 export function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
@@ -455,10 +520,23 @@ export function loosenings(oldS: Settings, newS: Settings): string[] {
     const removed = o.sites.filter((s) => !n.sites.includes(s));
     if (removed.length) out.push(`"${o.name}" unblocks ${removed.join(", ")}`);
   }
+  // A site can also loosen by moving. The first enabled group that lists it wins, so adding it to an
+  // earlier group with easier limits (or switching such a group back on) hands it those limits.
+  for (const site of new Set([...oldS.groups, ...newS.groups].flatMap((g) => g.sites))) {
+    const url = `https://${site.trim().replace(/^https?:\/\//i, "").replace(/^\*?\.?/, "")}`;
+    const before = matchGroup(url, oldS);
+    const after = matchGroup(url, newS);
+    if (before && after && before.id !== after.id && easier(before, after)) out.push(`"${site}" moves from "${before.name}" to "${after.name}"`);
+  }
   const added = newS.allowlist.filter((a) => !oldS.allowlist.includes(a));
   if (added.length) out.push(`Always allow ${added.join(", ")}`);
   if (newS.basePauseSec < oldS.basePauseSec || newS.maxPauseSec < oldS.maxPauseSec || newS.pauseStepSec < oldS.pauseStepSec) out.push("Shorter pause");
   if ((newS.lockHours ?? 24) < (oldS.lockHours ?? 24)) out.push(`Lock delay ${oldS.lockHours ?? 24} to ${newS.lockHours} hours`);
   if (newS.resetHour !== oldS.resetHour) out.push(`New day starts at ${newS.resetHour}:00`);
   return out;
+}
+
+// True if group b is easier than group a on any limit.
+function easier(a: Group, b: Group): boolean {
+  return b.dailyMin > a.dailyMin || b.sessionMin > a.sessionMin || b.cooldownMin < a.cooldownMin || (a.confirm && !b.confirm);
 }

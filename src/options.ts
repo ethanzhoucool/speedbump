@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, CHALLENGE, MIN, HOUR, loosenings } from "./core.ts";
+import { DEFAULT_SETTINGS, CHALLENGE, MIN, loosenings, shiftDay } from "./core.ts";
 import type { Group, Settings, Summary } from "./core.ts";
 import { send } from "./messages.ts";
 import { $, esc, favicon, blockPaste } from "./dom.ts";
@@ -120,9 +120,13 @@ function renderGeneral() {
   $<HTMLTextAreaElement>("allow").value = draft.allowlist.join("\n");
 }
 
+// Number inputs let you type past their max. Most of these are stricter when bigger, so a stray digit
+// saves at once: a lock of 2400 h instead of 24 would hold every looser change for 100 days.
 for (const [id, key] of general) {
   const el = $<HTMLInputElement>(id);
-  el.addEventListener("input", () => { draft[key] = Math.max(Number(el.min) || 0, Math.round(Number(el.value) || 0)); dirty(); });
+  const max = el.max ? Number(el.max) : Infinity;
+  el.addEventListener("input", () => { draft[key] = Math.min(max, Math.max(Number(el.min) || 0, Math.round(Number(el.value) || 0))); dirty(); });
+  el.addEventListener("change", () => { el.value = String(draft[key]); });
 }
 $<HTMLInputElement>("repLabel").addEventListener("input", (e) => { draft.replacement = { ...draft.replacement, label: (e.target as HTMLInputElement).value }; dirty(); });
 $<HTMLInputElement>("repUrl").addEventListener("input", (e) => { draft.replacement = { ...draft.replacement, url: (e.target as HTMLInputElement).value.trim() }; dirty(); });
@@ -210,9 +214,11 @@ confirmBtn.addEventListener("click", async () => {
 
 function renderStats(data: Summary) {
   const days = [];
+  // Count back from the worker's day by the calendar. Steps of 24 h repeat or skip a day around DST.
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86_400_000 - (saved.resetHour || 0) * HOUR);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const key = shiftDay(data.day, -i);
+    const [y, m, dd] = key.split("-").map(Number);
+    const d = new Date(y, m - 1, dd, 12);
     const isToday = key === data.day;
     const vals = isToday ? data.rows : Object.values(data.history[key] || {});
     days.push({

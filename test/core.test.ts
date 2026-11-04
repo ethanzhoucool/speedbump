@@ -189,10 +189,21 @@ test("nuclear mode ends running sessions and refunds what's left", () => {
   const st = emptyState(T0, S);
   const g = gs(st, "x");
   startSession(x, g, T0, 15);
+  g.session!.lastSeen = T0 + 5 * MIN;
   startNuclear(st, S, T0 + 5 * MIN, 30);
   assert.equal(g.session, null);
   assert.equal(remainingMs(x, g, T0 + 5 * MIN), 40 * MIN);
   assert.equal(g.fullSessions, 0, "being cut off doesn't lengthen the next pause");
+});
+
+test("nuclear mode charges a session left behind only up to when it was last seen", () => {
+  const st = emptyState(T0, S);
+  const g = gs(st, "x");
+  startSession(x, g, T0, 15);
+  g.session!.lastSeen = T0 + 3 * MIN;
+  startNuclear(st, S, T0 + 10 * MIN, 30);
+  assert.equal(g.session, null);
+  assert.equal(g.usedMs, 3 * MIN);
 });
 
 test("nuclear mode survives a new day and old saved state starts with it off", () => {
