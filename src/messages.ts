@@ -14,7 +14,8 @@ export type Message =
   | { type: "borrowStart"; groupId: string }
   | { type: "borrow"; groupId: string; reason: string; phrase: string }
   | { type: "agentProblem"; url: string }
-  | { type: "agentPass"; url: string; answer: string };
+  | { type: "agentPass"; url: string; answer: string }
+  | { type: "nuclear"; minutes: number };
 
 export interface PillInfo { groupId: string; name: string; end: number; intent: string }
 
@@ -37,6 +38,7 @@ export interface Replies {
   borrow: Ok;
   agentProblem: AgentProblemView | { missing: true };
   agentPass: Ok;
+  nuclear: { until: number };
 }
 
 export function send<M extends Message>(msg: M): Promise<Replies[M["type"]]> {

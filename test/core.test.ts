@@ -6,6 +6,7 @@ import {
   remainingMs, sessionsLeft, pauseSeconds, lengthOptions, emptyState, gs, rollover, loosenings,
   canBorrow, borrow, requestChange, pendingStatus, HOUR, normalize, cooldownUntil,
   makeAgentProblem, agentAnswer, checkAgentAnswer, agentText, agentPassUrl,
+  NUCLEAR, nuclearOn, startNuclear,
 } from "../src/core.ts";
 import type { Settings } from "../src/core.ts";
 
@@ -159,6 +160,51 @@ test("state saved by 1.0 is upgraded in place", () => {
   assert.equal("cooldownUntil" in g, false);
   assert.deepEqual(st.debt, {});
   assert.equal(status(x, g, T0), "ready");
+});
+
+test("nuclear mode runs for the chosen time, 30 min by default", () => {
+  const st = emptyState(T0, S);
+  assert.equal(NUCLEAR.defaultMin, 30);
+  assert.equal(nuclearOn(st, T0), false);
+  assert.equal(startNuclear(st, S, T0, NUCLEAR.defaultMin), T0 + 30 * MIN);
+  assert.equal(nuclearOn(st, T0 + 29 * MIN), true);
+  assert.equal(nuclearOn(st, T0 + 30 * MIN), false);
+});
+
+test("nuclear mode can't be shortened, only pushed out", () => {
+  const st = emptyState(T0, S);
+  startNuclear(st, S, T0, 120);
+  assert.equal(startNuclear(st, S, T0 + MIN, 15), T0 + 120 * MIN, "a shorter restart changes nothing");
+  assert.equal(startNuclear(st, S, T0 + MIN, 240), T0 + MIN + 240 * MIN);
+});
+
+test("nuclear mode keeps its length inside the limits", () => {
+  const at = (minutes: number) => (startNuclear(emptyState(T0, S), S, T0, minutes) - T0) / MIN;
+  assert.equal(at(99_999), NUCLEAR.maxMin);
+  assert.equal(at(-5), 1);
+  assert.equal(at(Number.NaN), NUCLEAR.defaultMin);
+});
+
+test("nuclear mode ends running sessions and refunds what's left", () => {
+  const st = emptyState(T0, S);
+  const g = gs(st, "x");
+  startSession(x, g, T0, 15);
+  startNuclear(st, S, T0 + 5 * MIN, 30);
+  assert.equal(g.session, null);
+  assert.equal(remainingMs(x, g, T0 + 5 * MIN), 40 * MIN);
+  assert.equal(g.fullSessions, 0, "being cut off doesn't lengthen the next pause");
+});
+
+test("nuclear mode survives a new day and old saved state starts with it off", () => {
+  const st = emptyState(T0, S);
+  startNuclear(st, S, T0, 60);
+  const justAfterMidnight = new Date(2026, 9, 29, 0, 5).getTime();
+  st.nuclearUntil = justAfterMidnight + 30 * MIN;
+  assert.ok(rollover(st, justAfterMidnight, S));
+  assert.equal(nuclearOn(st, justAfterMidnight), true);
+  const legacy = normalize({ day: "2026-10-29", groups: {}, history: {}, debt: {} } as never);
+  assert.equal(legacy.nuclearUntil, 0);
+  assert.equal(nuclearOn(undefined, T0), false);
 });
 
 test("agent pass: Dirichlet integral, exact fractions in any form", () => {

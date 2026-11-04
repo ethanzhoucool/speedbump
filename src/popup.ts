@@ -1,4 +1,4 @@
-import { MIN } from "./core.ts";
+import { MIN, NUCLEAR } from "./core.ts";
 import type { Summary, SummaryRow } from "./core.ts";
 import { send } from "./messages.ts";
 import { $, esc, favicon } from "./dom.ts";
@@ -21,8 +21,70 @@ function stateText(r: SummaryRow, now: number): [string, string] {
   }
 }
 
+const nukeMin = $<HTMLInputElement>("nukeMin");
+const nukeGo = $<HTMLButtonElement>("nukeGo");
+const nukePresets = $("nukePresets");
+let nukeArmed: ReturnType<typeof setTimeout> | undefined;
+
+const nukeLength = (m: number) => {
+  const h = Math.floor(m / 60), r = m % 60;
+  return h ? `${h} h${r ? ` ${r} min` : ""}` : `${m} min`;
+};
+
+// Null until the box holds a whole number of minutes inside the limits.
+function nukeChosen(): number | null {
+  const m = Number(nukeMin.value);
+  return Number.isInteger(m) && m >= 1 && m <= NUCLEAR.maxMin ? m : null;
+}
+
+// It can't be undone, so the first click only arms the button.
+function nukeDisarm() {
+  clearTimeout(nukeArmed);
+  nukeArmed = undefined;
+  nukeGo.classList.remove("armed");
+  const m = nukeChosen();
+  nukeGo.disabled = m === null;
+  nukeGo.textContent = m === null ? `Pick 1 to ${NUCLEAR.maxMin} min` : `Go nuclear for ${nukeLength(m)}`;
+  nukePresets.querySelectorAll<HTMLButtonElement>("button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.m) === m)));
+}
+
+nukePresets.innerHTML = NUCLEAR.presets.map((m) => `<button type="button" data-m="${m}">${m < 60 ? `${m}m` : `${m / 60}h`}</button>`).join("");
+nukePresets.querySelectorAll<HTMLButtonElement>("button").forEach((b) => b.addEventListener("click", () => {
+  nukeMin.value = b.dataset.m!;
+  nukeDisarm();
+}));
+nukeMin.max = String(NUCLEAR.maxMin);
+nukeMin.value = String(NUCLEAR.defaultMin);
+nukeMin.addEventListener("input", nukeDisarm);
+nukeGo.addEventListener("click", async () => {
+  const minutes = nukeChosen();
+  if (minutes === null) return;
+  if (nukeArmed === undefined) {
+    nukeGo.classList.add("armed");
+    nukeGo.textContent = "Click again. This can't be undone.";
+    nukeArmed = setTimeout(nukeDisarm, 4000);
+    return;
+  }
+  nukeDisarm();
+  nukeGo.disabled = true;
+  await send({ type: "nuclear", minutes });
+  await load();
+  nukeDisarm();
+});
+nukeDisarm();
+
+function renderNuclear(data: Summary, now: number) {
+  const on = data.nuclearUntil > now;
+  $("nukeLive").hidden = !on;
+  $("nukePanel").hidden = on;
+  if (!on) return;
+  $("nukeLeft").textContent = `${fmt(data.nuclearUntil - now)} left`;
+  $("nukeUntil").textContent = `Limited sites close on sight until ${new Date(data.nuclearUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`;
+}
+
 function render(data: Summary) {
   const now = Date.now();
+  renderNuclear(data, now);
   const rows = data.rows.filter((r) => r.group.enabled);
   const attempts = rows.reduce((a, r) => a + r.attempts, 0);
   const dismissed = rows.reduce((a, r) => a + r.dismissed, 0);

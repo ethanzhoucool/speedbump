@@ -29,12 +29,44 @@
     .debt { color: var(--warn); }
     .banner { display: block; margin: 0 0 12px; padding-left: 10px; border-left: 2px solid var(--warn); font-size: 12.5px; text-decoration: none; color: var(--text); }
     .banner:empty { display: none; }
+    .nuke { margin: 0 0 12px; }
+    .nuke[hidden], .nuke-live[hidden] { display: none; }
+    .nuke summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+    .nuke summary:hover, .nuke[open] summary { color: var(--text); }
+    .nuke-body { display: grid; gap: 10px; padding-top: 8px; }
+    .nuke-live { margin: 0 0 12px; padding-left: 10px; border-left: 2px solid var(--warn); font-size: 12.5px; }
+    .nuke-live .row b { font-size: 14px; color: var(--warn); }
+    .nuke-live p, .nuke p { margin: 0; font-size: 12px; color: var(--muted); }
+    .nuke-pick { display: flex; align-items: center; gap: 8px; }
+    .seg { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); }
+    .seg button { border: 0; background: transparent; color: var(--muted); border-radius: 999px; padding: 6px 0; font: 600 12px var(--font); cursor: pointer; }
+    .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+    .nuke-custom { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); }
+    .nuke-custom input[type="number"] { width: 52px; padding: 5px 6px; font-size: 12.5px; text-align: right; -moz-appearance: textfield; }
+    .nuke-custom input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    #nukeGo { width: 100%; }
+    #nukeGo.armed { background: var(--warn); border-color: var(--warn); color: var(--accent-ink); }
   </style>
 </head>
 <body>
   <header><h1>Today</h1><a href="options.html" target="_blank">Settings</a></header>
   <p class="tally" id="tally"></p>
   <a class="banner" id="banner" href="options.html" target="_blank"></a>
+  <section class="nuke-live" id="nukeLive" hidden>
+    <div class="row"><span class="name">Nuclear mode</span><b class="num" id="nukeLeft"></b></div>
+    <p id="nukeUntil"></p>
+  </section>
+  <details class="nuke" id="nukePanel" hidden>
+    <summary>Nuclear mode</summary>
+    <div class="nuke-body">
+      <p>Closes limited sites on sight. You can't turn it off until the timer ends.</p>
+      <div class="nuke-pick">
+        <div class="seg" id="nukePresets" role="group" aria-label="Preset lengths"></div>
+        <label class="nuke-custom"><input type="number" id="nukeMin" min="1" step="1" aria-label="Length in minutes">min</label>
+      </div>
+      <button class="btn btn-ghost btn-small" id="nukeGo"></button>
+    </div>
+  </details>
   <ul id="list"><li class="empty">Loading</li></ul>
   <script type="module" src="popup.js"></script>
 </body>

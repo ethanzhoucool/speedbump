@@ -2,7 +2,7 @@ import {
   DEFAULT_SETTINGS, CHALLENGE, MIN, matchGroup, emptyState, gs, rollover, status, startSession, endSession,
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
-  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl,
+  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, nuclearOn, startNuclear,
 } from "./core.ts";
 import type { AgentProblem, GateInfo, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
 import type { Message, Replies } from "./messages.ts";
@@ -94,17 +94,48 @@ function gateUrl(groupId: string, url: string): string {
   return `${GATE}?g=${encodeURIComponent(groupId)}&u=${encodeURIComponent(url)}&agent_pass=${encodeURIComponent(agentPassUrl(url))}`;
 }
 
+// Reads the cached state directly because going through withState would write to storage on every check.
+async function nuclearActive(): Promise<boolean> {
+  return nuclearOn(stateCache ?? (await stored("state")).state, Date.now());
+}
+
+const closing = new Set<number>();
+
+// Closing a window's only tab closes the window, and on Windows or Linux closing the last window quits
+// Chrome. A restored session would then quit it again, so a new tab stays behind.
+async function closeTab(tabId: number) {
+  if (closing.has(tabId)) return;
+  closing.add(tabId);
+  try {
+    const { windowId } = await chrome.tabs.get(tabId);
+    const inWindow = await chrome.tabs.query({ windowId });
+    if (inWindow.length === 1) await chrome.tabs.create({ windowId }).catch(() => {});
+    await chrome.tabs.remove(tabId);
+  } catch {
+    // The tab is already gone, or it's being dragged and the next tick tries again.
+  } finally {
+    closing.delete(tabId);
+  }
+}
+
 // One visit fires both webNavigation and tabs.onUpdated; only count it once.
 const recent = new Map<number, { url: string; t: number }>();
 
 // Decide what happens when a tab lands on a URL.
 async function check(tabId: number, url: string | undefined) {
-  if (!url || url.startsWith(GATE)) return;
+  if (!url) return;
+  // The gate leads straight to the site, so nuclear mode closes it too.
+  if (url.startsWith(GATE)) {
+    if (await nuclearActive()) closeTab(tabId);
+    return;
+  }
   const last = recent.get(tabId);
   if (last && last.url === url && Date.now() - last.t < 2000) return;
   recent.set(tabId, { url, t: Date.now() });
   const group = matchGroup(url, await loadSettings());
   if (!group) return;
+  // Checked before agent passes, because nuclear mode has no exceptions.
+  if (await nuclearActive()) return closeTab(tabId);
   if (await agentAllowed(tabId, group.id)) return;
   const redirect = await withState((_s, st, now) => {
     const g = gs(st, group.id);
@@ -153,6 +184,13 @@ chrome.alarms.onAlarm.addListener((a) => {
 async function tick() {
   const tabs = await chrome.tabs.query({});
   const settings = await loadSettings();
+  // Catches tabs that no navigation reports: ones already open, restored at startup, or newly limited.
+  // One at a time, so closeTab sees how many tabs are really left in the window.
+  if (await nuclearActive()) {
+    for (const t of tabs) {
+      if (t.url && (t.url.startsWith(GATE) || matchGroup(t.url, settings))) await closeTab(t.id!);
+    }
+  }
   const { agentTabs } = await agentStore();
   const passed = (t: chrome.tabs.Tab) => (agentTabs[t.id!]?.end ?? 0) > Date.now();
   const kicked = await withState((_s, st, now) => {
@@ -198,6 +236,12 @@ async function updateBadge() {
   const settings = await loadSettings();
   const state = stateCache ?? (await stored("state")).state;
   const now = Date.now();
+  if (nuclearOn(state, now)) {
+    const left = Math.ceil((state!.nuclearUntil - now) / MIN);
+    chrome.action.setBadgeText({ text: left > 99 ? `${Math.ceil(left / 60)}h` : `${left}m` });
+    chrome.action.setBadgeBackgroundColor({ color: "#b4543a" });
+    return;
+  }
   const ends = settings.groups.map((gr) => state?.groups?.[gr.id]?.session?.end ?? 0).filter((e) => e > now);
   const text = ends.length ? `${Math.ceil((Math.min(...ends) - now) / MIN)}m` : "";
   chrome.action.setBadgeText({ text });
@@ -267,8 +311,13 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
     case "summary":
       return withState(async (_s, st, now): Promise<Summary> => ({
         now, rows: rows(settings, st, now), history: st.history, day: st.day, debt: st.debt,
-        pending: await currentPending(settings, now), lockHours: settings.lockHours ?? 24,
+        pending: await currentPending(settings, now), lockHours: settings.lockHours ?? 24, nuclearUntil: st.nuclearUntil,
       }));
+    case "nuclear": {
+      const until = await withState((_s, st, now) => startNuclear(st, settings, now, msg.minutes));
+      await tick();
+      return { until };
+    }
     case "saveSettings": {
       const looser = loosenings(settings, msg.settings);
       if (!looser.length) {

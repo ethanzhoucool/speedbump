@@ -25,7 +25,8 @@ npm run build
 - **Loosening is slow.** Raising a limit, shortening a cooldown, removing a site, turning a group off, allow-listing a site or shortening the lock all count as loosening. You type a sentence (no pasting), then the change waits 24 hours. After that you have 24 hours to come back, type it again and confirm, or it lapses. Saving any other change in between cancels the request.
 - **Extra time costs tomorrow.** On the cooldown or "done for today" screen you can borrow 10 minutes, once per group per day. You write why (40+ characters), type a sentence and wait 90 seconds with the tab in front. Those 10 minutes come off tomorrow's budget.
 - **Agent pass.** For letting Claude in Chrome read a limited site. Chrome won't let one extension read another's pages, so the pass is on `https://example.com/#speedbump=<url>` instead. It shows a random triple integral with a long exact-fraction answer. The problem can't be copied, the answer can't be pasted, and there are 2 minutes per problem. A reload or a wrong answer gives a new one. Solving it opens the site in that one tab for 15 minutes. Other tabs stay limited, and budgets, cooldowns, pauses and stats don't change.
-- **The one way out.** Turning the extension off in `chrome://extensions` can't be blocked. Everything else goes through the rules above.
+- **Nuclear mode.** Pick a length in the popup (30 min by default, up to 24 h) and click twice. Every tab on a limited site closes right away, and so does any you open until the timer ends. Gate screens and agent-pass tabs close too. Running sessions end and their unused minutes go back into the day's budget. Always-allowed sites and groups that are turned off aren't touched. There's no off switch, and restarting Chrome doesn't end it.
+- **The one way out.** Turning the extension off in `chrome://extensions` can't be blocked. Everything else goes through the rules above. Turning it back on resumes any nuclear mode that still has time left.
 
 ## Why it's designed this way
 
@@ -42,7 +43,7 @@ npm run build
 | `src/messages.ts` | Typed messages between the pages and the service worker. |
 | `src/gate.ts` | The pause, session setup, cooldown and borrow screens. |
 | `src/options.ts` | Settings page. |
-| `src/popup.ts` | Toolbar popup with today's status. |
+| `src/popup.ts` | Toolbar popup with today's status and the nuclear mode controls. |
 | `src/agent.ts` | Content script for the agent pass page on example.com. |
 | `src/pill.ts` | Content script for the timer in the corner of limited sites. |
 | `test/` | Node tests for `core.ts`. |

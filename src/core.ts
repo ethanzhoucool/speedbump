@@ -23,6 +23,10 @@ export function agentPassUrl(url: string): string {
   return `${AGENT_PAGE}#speedbump=${encodeURIComponent(url)}`;
 }
 
+// Nuclear mode closes limited tabs on sight for a set time. Like any tightening it starts at once,
+// and nothing ends it early. The cap keeps a typo from locking someone out for a month.
+export const NUCLEAR = { defaultMin: 30, maxMin: 24 * 60, presets: [15, 30, 60, 120, 240] };
+
 export interface Group {
   id: string;
   name: string;
@@ -80,6 +84,8 @@ export interface State {
   history: Record<string, Record<string, DaySnapshot>>;
   // Minutes borrowed today, taken off tomorrow's budget.
   debt: Record<string, number>;
+  // When nuclear mode ends, or 0. It lives outside groups so a new day doesn't clear it.
+  nuclearUntil: number;
 }
 
 export type Status = "ready" | "active" | "cooldown" | "exhausted";
@@ -143,6 +149,7 @@ export interface Summary {
   debt: State["debt"];
   pending: PendingView | null;
   lockHours: number;
+  nuclearUntil: number;
 }
 
 // A starting point anyone can edit. Settings are stored in chrome.storage after the first run.
@@ -216,13 +223,14 @@ export function freshGroupState(): GroupState {
 }
 
 export function emptyState(now: number, settings: Settings): State {
-  return { day: dayKey(now, settings.resetHour), groups: {}, history: {}, debt: {} };
+  return { day: dayKey(now, settings.resetHour), groups: {}, history: {}, debt: {}, nuclearUntil: 0 };
 }
 
 // Fills fields added in later versions and drops ones that were replaced.
 export function normalize(state: State): State {
   state.history ||= {};
   state.debt ||= {};
+  state.nuclearUntil ||= 0;
   for (const [id, g] of Object.entries(state.groups || {})) {
     const { cooldownUntil: _legacy, ...rest } = g as GroupState & { cooldownUntil?: number };
     state.groups[id] = { ...freshGroupState(), ...rest };
@@ -332,6 +340,21 @@ export function borrow(group: Group, g: GroupState, now: number): number {
   g.session = { start: now, end: now + ms, lastSeen: now, intent: "Borrowed time", borrowed: true };
   g.sessions += 1;
   return ms;
+}
+
+export function nuclearOn(state: Pick<State, "nuclearUntil"> | undefined, now: number): boolean {
+  return (state?.nuclearUntil ?? 0) > now;
+}
+
+// Running sessions end the usual way, so unused minutes go back. Starting again can only push the end out.
+export function startNuclear(state: State, settings: Settings, now: number, minutes: number): number {
+  const min = Math.min(NUCLEAR.maxMin, Math.max(1, Math.round(minutes) || NUCLEAR.defaultMin));
+  state.nuclearUntil = Math.max(state.nuclearUntil, now + min * MIN);
+  for (const group of settings.groups) {
+    const g = state.groups[group.id];
+    if (g) endSession(group, g, now);
+  }
+  return state.nuclearUntil;
 }
 
 export interface Term { k: number; p: number; q: number; r: number }
