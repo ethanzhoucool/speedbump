@@ -248,7 +248,7 @@ test("agent problems are random and spelled out", () => {
 });
 
 test("agent pass URL round-trips the target", () => {
-  const u = agentPassUrl("https://x.com/eyonjang?a=1&b=2");
-  assert.equal(u, "https://example.com/#speedbump=https%3A%2F%2Fx.com%2Feyonjang%3Fa%3D1%26b%3D2");
-  assert.equal(decodeURIComponent(u.split("#speedbump=")[1]), "https://x.com/eyonjang?a=1&b=2");
+  const u = agentPassUrl("https://x.com/someone?a=1&b=2");
+  assert.equal(u, "https://example.com/#speedbump=https%3A%2F%2Fx.com%2Fsomeone%3Fa%3D1%26b%3D2");
+  assert.equal(decodeURIComponent(u.split("#speedbump=")[1]), "https://x.com/someone?a=1&b=2");
 });
