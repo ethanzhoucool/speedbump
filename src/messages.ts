@@ -15,9 +15,14 @@ export type Message =
   | { type: "borrow"; groupId: string; reason: string; phrase: string }
   | { type: "agentProblem"; url: string }
   | { type: "agentPass"; url: string; answer: string }
-  | { type: "nuclear"; minutes: number };
+  | { type: "nuclear"; minutes: number }
+  | { type: "searchOnly"; url: string }
+  | { type: "openGate"; groupId: string };
 
 export interface PillInfo { groupId: string; name: string; end: number; intent: string }
+
+// strip.ts is a classic content script and keeps its own copy of this shape.
+export interface SearchInfo { groupId: string; name: string; home: string; action: string; param: string; atHome: boolean; until: number }
 
 export interface Ok { ok: boolean; error?: string }
 
@@ -39,6 +44,8 @@ export interface Replies {
   agentProblem: AgentProblemView | { missing: true };
   agentPass: Ok;
   nuclear: { until: number };
+  searchOnly: SearchInfo | null;
+  openGate: Ok;
 }
 
 export function send<M extends Message>(msg: M): Promise<Replies[M["type"]]> {

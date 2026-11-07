@@ -5,7 +5,7 @@ import {
   clampSession,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
   AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, nuclearOn, startNuclear,
-  settle,
+  settle, searchRoute, upgradeToV3,
 } from "./core.ts";
 import type { AgentProblem, GateInfo, Group, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
 import type { Message, Replies } from "./messages.ts";
@@ -69,6 +69,11 @@ async function migrate() {
     await chrome.storage.local.set({ settings });
     await chrome.storage.local.remove("pending");
   }
+  // A looser request made before this goes stale by itself, because the rules it was based on changed.
+  if (settings.version < 3) {
+    upgradeToV3(settings);
+    await chrome.storage.local.set({ settings });
+  }
 }
 
 const ready = migrate();
@@ -129,9 +134,16 @@ async function closeTab(tabId: number) {
 // One visit fires both webNavigation and tabs.onUpdated; only count it once.
 const recent = new Map<number, { url: string; t: number }>();
 
-// Decide what happens when a tab lands on a URL.
-async function check(tabId: number, url: string | undefined) {
+// Where the worker itself just sent a tab whose session ran out. Arriving there isn't a visit. With no
+// cooldown it would otherwise start the next session straight away, so sessions would never stop.
+const sentHome = new Map<number, string>();
+
+// Decide what happens when a tab lands on a URL. `passive` means nobody just went there: it's a tab that was
+// already open in front.
+async function check(tabId: number, url: string | undefined, passive = false) {
   if (!url) return;
+  if (sentHome.get(tabId) === url) passive = true;
+  else sentHome.delete(tabId);
   // The gate leads straight to the site, so nuclear mode closes it too.
   if (url.startsWith(GATE)) {
     if (await nuclearActive()) closeTab(tabId);
@@ -145,16 +157,22 @@ async function check(tabId: number, url: string | undefined) {
   // Checked before agent passes, because nuclear mode has no exceptions.
   if (await nuclearActive()) return closeTab(tabId);
   if (await agentAllowed(tabId, group.id)) return;
-  const redirect = await withState((s, st, now) => {
+  const route = searchRoute(url, group);
+  const outcome = await withState((s, st, now) => {
     const g = live(st, group, s, now);
     const stat = status(group, g, now);
-    if (stat === "active") { g.session!.lastSeen = now; return false; }
-    if (stat === "ready" && !group.confirm) { startSession(group, g, now, group.sessionMin); armEnd(group.id, g); return false; }
+    if (stat === "active") { g.session!.lastSeen = now; return "open"; }
+    // When a cooldown ends, a tab being read stays as it is. Starting a session is for an actual visit.
+    if (route && (stat !== "ready" || passive)) return "search";
+    if (stat === "ready" && !group.confirm) { startSession(group, g, now, group.sessionMin); armEnd(group.id, g); return "open"; }
     g.attempts += 1;
-    return true;
+    return "gate";
   });
-  if (redirect) chrome.tabs.update(tabId, { url: gateUrl(group.id, url) }).catch(() => {});
-  else updateBadge();
+  if (outcome === "gate") { chrome.tabs.update(tabId, { url: gateUrl(group.id, url) }).catch(() => {}); return; }
+  if (outcome === "search" && route?.redirect) { chrome.tabs.update(tabId, { url: route.redirect }).catch(() => {}); return; }
+  // The page stays loaded, so its content script has to hear that the mode may have changed.
+  if (route) chrome.tabs.sendMessage(tabId, { type: "searchOnlyChanged" }).catch(() => {});
+  if (outcome === "open") updateBadge();
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((d) => { if (d.frameId === 0) check(d.tabId, d.url); });
@@ -167,6 +185,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 });
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   recent.delete(tabId);
+  sentHome.delete(tabId);
   const { agentTabs, agentAsks } = await agentStore();
   if (!(tabId in agentTabs) && !(tabId in agentAsks)) return;
   delete agentTabs[tabId];
@@ -218,7 +237,13 @@ async function tick() {
       // Settle before marking the session seen. After a sleep the tab is still in front, and marking it
       // seen first would charge the whole time away as used.
       const ended = settle(group, g, now, settings.idleGraceMin * MIN);
-      if (ended === "expired") out.push(...open.map((t): [number, string] => [t.id!, gateUrl(group.id, t.url!)]));
+      if (ended === "expired") {
+        for (const t of open) {
+          const home = searchRoute(t.url!, group)?.home;
+          if (home) sentHome.set(t.id!, home);
+          out.push([t.id!, home ?? gateUrl(group.id, t.url!)]);
+        }
+      }
       else if (!ended && open.some((t) => t.active)) g.session.lastSeen = now;
     }
     // A site still in front with no session (End was pressed, or the day rolled over) would otherwise
@@ -229,7 +254,7 @@ async function tick() {
   for (const [id, url] of kicked) chrome.tabs.update(id, { url }).catch(() => {});
   if (kicked.length) notifyEnd();
   // Not a repeat of the navigation event that `recent` dedupes, so let it through.
-  for (const t of loose) { recent.delete(t.id!); check(t.id!, t.url!); }
+  for (const t of loose) { recent.delete(t.id!); check(t.id!, t.url!, true); }
   // An expired pass sends its tab to the gate like any other visit. A tab in front was just checked above,
   // and checking it twice would count two gate stops.
   const expired = Object.keys(agentTabs).filter((id) => agentTabs[id].end <= Date.now());
@@ -318,6 +343,28 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       if (group) await withState((_s, st, now) => { endSession(group, gs(st, group.id), now); });
       await tick();
       return { ok: true };
+    case "searchOnly": {
+      const match = matchGroup(msg.url, settings);
+      const route = match && searchRoute(msg.url, match);
+      if (!match || !route) return null;
+      if (sender.tab?.id !== undefined && await agentAllowed(sender.tab.id, match.id)) return null;
+      return withState((_s, st, now) => {
+        const g = live(st, match, settings, now);
+        const stat = status(match, g, now);
+        if (stat === "active") return null;
+        const until = stat === "cooldown" ? cooldownUntil(match, g) : stat === "exhausted" ? nextResetAt(now, settings.resetHour) : 0;
+        // A page that's being redirected shows the search page too, so it doesn't appear for a moment first.
+        return { groupId: match.id, name: route.name, home: route.home, action: route.action, param: route.param, atHome: route.atHome || !!route.redirect, until };
+      });
+    }
+    // Search-only mode skips the gate, and this is the way back to it for borrowing time.
+    case "openGate": {
+      const tab = sender.tab;
+      if (!group || tab?.id === undefined || !tab.url) return { ok: false };
+      await withState((_s, st) => { gs(st, group.id).attempts += 1; });
+      await chrome.tabs.update(tab.id, { url: gateUrl(group.id, tab.url) });
+      return { ok: true };
+    }
     case "pill": {
       const url = sender.tab?.url;
       const match = url ? matchGroup(url, settings) : null;

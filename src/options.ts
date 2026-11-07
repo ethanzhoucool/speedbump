@@ -75,6 +75,7 @@ function groupRow(g: Group, i: number) {
     ${num("dailyMin", "Per day", g.dailyMin, 0)}
     ${num("cooldownMin", "Cooldown", g.cooldownMin, 0)}
     <td class="c"><input type="checkbox" data-k="confirm" ${g.confirm ? "checked" : ""} aria-label="Ask first"></td>
+    <td class="c"><input type="checkbox" data-k="searchOnly" ${g.searchOnly ? "checked" : ""} aria-label="Search only when out of time"></td>
     <td class="c keep"><input type="checkbox" data-k="enabled" ${g.enabled ? "checked" : ""} aria-label="On"></td>
     <td class="c"><button class="x" data-del aria-label="Delete ${esc(g.name)}">×</button></td>
   </tr>`;
@@ -87,7 +88,7 @@ function renderGroups() {
     const g = draft.groups[Number(row.dataset.i)];
     row.querySelectorAll<HTMLInputElement>("[data-k]").forEach((el) => el.addEventListener("input", () => {
       const k = el.dataset.k as keyof Group;
-      if (k === "confirm" || k === "enabled") g[k] = el.checked;
+      if (k === "confirm" || k === "enabled" || k === "searchOnly") g[k] = el.checked;
       else if (k === "sessionMin" || k === "dailyMin" || k === "cooldownMin") g[k] = Math.max(Number(el.min) || 0, Math.round(Number(el.value) || 0));
       else if (k === "sites") g.sites = siteList(el.value);
       else if (k === "name") g.name = el.value;

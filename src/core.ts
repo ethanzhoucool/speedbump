@@ -36,6 +36,8 @@ export interface Group {
   dailyMin: number;
   cooldownMin: number;
   enabled: boolean;
+  // Out of time, sites with a SEARCH_SITES entry stay open with only search left. Others still get the gate.
+  searchOnly?: boolean;
 }
 
 export interface Settings {
@@ -154,7 +156,7 @@ export interface Summary {
 
 // A starting point anyone can edit. Settings are stored in chrome.storage after the first run.
 export const DEFAULT_SETTINGS: Settings = {
-  version: 2,
+  version: 3,
   resetHour: 0,
   basePauseSec: 5,
   pauseStepSec: 5,
@@ -167,10 +169,36 @@ export const DEFAULT_SETTINGS: Settings = {
     { id: "x", name: "X", sites: ["x.com", "twitter.com"], confirm: true, sessionMin: 15, dailyMin: 45, cooldownMin: 15, enabled: true },
     { id: "instagram", name: "Instagram", sites: ["instagram.com"], confirm: true, sessionMin: 15, dailyMin: 45, cooldownMin: 15, enabled: true },
     { id: "facebook", name: "Facebook", sites: ["facebook.com"], confirm: true, sessionMin: 15, dailyMin: 45, cooldownMin: 15, enabled: true },
-    { id: "reddit", name: "Reddit", sites: ["reddit.com"], confirm: true, sessionMin: 15, dailyMin: 45, cooldownMin: 15, enabled: true },
-    { id: "video", name: "YouTube and TikTok", sites: ["youtube.com", "tiktok.com"], confirm: false, sessionMin: 30, dailyMin: 90, cooldownMin: 15, enabled: true },
+    { id: "reddit", name: "Reddit", sites: ["reddit.com"], confirm: true, sessionMin: 15, dailyMin: 15, cooldownMin: 15, enabled: true, searchOnly: true },
+    { id: "video", name: "YouTube and TikTok", sites: ["youtube.com", "tiktok.com"], confirm: false, sessionMin: 30, dailyMin: 90, cooldownMin: 15, enabled: true, searchOnly: true },
   ],
 };
+
+const siteHost = (site: string) => site.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^\*?\.?/, "").replace(/^www\./, "").split("/")[0];
+const onDomain = (site: string, domain: string) => siteHost(site) === domain || siteHost(site).endsWith(`.${domain}`);
+
+// Version 3 gives YouTube and Reddit search-only mode and puts Reddit on its own 15 minutes a day, apart from
+// any group it shared. Settings are stored after the first run, so changing the defaults alone wouldn't reach
+// an existing install. Limits only move down, and whatever Reddit shared a group with keeps its limits.
+export function upgradeToV3(settings: Settings): void {
+  const isReddit = (site: string) => onDomain(site, "reddit.com");
+  let reddit = settings.groups.find((g) => g.sites.length > 0 && g.sites.every(isReddit));
+  for (const g of settings.groups) {
+    if (g !== reddit) g.sites = g.sites.filter((s) => !isReddit(s));
+    if (g.sites.some((s) => onDomain(s, "youtube.com"))) g.searchOnly = true;
+  }
+  if (!reddit) {
+    const id = settings.groups.some((g) => g.id === "reddit") ? "reddit-own" : "reddit";
+    reddit = { id, name: "Reddit", sites: [], confirm: true, sessionMin: 15, dailyMin: 15, cooldownMin: 15, enabled: true };
+    settings.groups.push(reddit);
+  }
+  reddit.sites = ["reddit.com"];
+  reddit.enabled = true;
+  reddit.searchOnly = true;
+  reddit.dailyMin = Math.min(reddit.dailyMin, 15);
+  reddit.sessionMin = Math.min(reddit.sessionMin, 15);
+  settings.version = 3;
+}
 
 const formatDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -228,6 +256,55 @@ export function matchGroup(url: string, settings: Settings): Group | null {
   const p = parse(url);
   if (!p || isAllowed(url, settings)) return null;
   return settings.groups.find((g) => g.enabled && g.sites.some((s) => siteMatches(s, p))) || null;
+}
+
+// What's left of a site in search-only mode. `hosts` maps each hostname to the origin it belongs on, and
+// `open` lists the paths that stay reachable. Every other path goes back to the search page, so feeds,
+// channels and subreddits are gone by URL, whatever a site does to its page layout.
+interface SearchSite { name: string; hosts: Record<string, string>; action: string; param: string; open: RegExp[] }
+
+const YOUTUBE = "https://www.youtube.com";
+const REDDIT = "https://www.reddit.com";
+const SEARCH_SITES: SearchSite[] = [
+  {
+    name: "YouTube",
+    hosts: { "youtube.com": YOUTUBE, "m.youtube.com": YOUTUBE },
+    action: "/results",
+    param: "search_query",
+    // Videos have to play or search is no use. Links in a description go through /redirect.
+    open: [/^\/(results|watch|redirect)\/?$/],
+  },
+  {
+    name: "Reddit",
+    hosts: { "reddit.com": REDDIT, "old.reddit.com": "https://old.reddit.com", "new.reddit.com": REDDIT, "sh.reddit.com": REDDIT, "np.reddit.com": REDDIT, "m.reddit.com": REDDIT, "i.reddit.com": REDDIT },
+    action: "/search/",
+    param: "q",
+    // Threads stay readable, including ones a web search leads to. /r/x/s/ is a share link to a thread.
+    open: [/^(\/r\/[^/]+)?\/search\/?$/, /^(\/(r|u|user)\/[^/]+)?\/comments\//, /^\/r\/[^/]+\/s\//, /^\/(gallery|media)(\/|$)/],
+  },
+];
+
+export interface SearchRoute {
+  name: string;
+  home: string;
+  action: string;
+  param: string;
+  atHome: boolean;
+  // Where the tab has to go instead, if this URL isn't part of search-only mode.
+  redirect: string | null;
+}
+
+export function searchRoute(url: string, group: Group): SearchRoute | null {
+  const p = parse(url);
+  if (!p || !group.searchOnly) return null;
+  const site = SEARCH_SITES.find((s) => Object.hasOwn(s.hosts, p.host));
+  if (!site) return null;
+  const origin = site.hosts[p.host];
+  const path = new URL(url).pathname;
+  const atHome = path === "/";
+  const open = atHome || site.open.some((r) => r.test(path));
+  const redirect = !open ? `${origin}/` : new URL(url).origin === origin ? null : origin + p.rest;
+  return { name: site.name, home: `${origin}/`, action: origin + site.action, param: site.param, atHome, redirect };
 }
 
 export interface TabLike { id?: number; url?: string; active?: boolean; status?: string }
@@ -517,6 +594,7 @@ export function loosenings(oldS: Settings, newS: Settings): string[] {
     if (n.sessionMin > o.sessionMin) out.push(`"${o.name}" session ${o.sessionMin} to ${n.sessionMin} min`);
     if (n.cooldownMin < o.cooldownMin) out.push(`"${o.name}" cooldown ${o.cooldownMin} to ${n.cooldownMin} min`);
     if (o.confirm && !n.confirm) out.push(`"${o.name}" stops asking first`);
+    if (!o.searchOnly && n.searchOnly) out.push(`"${o.name}" keeps search when time runs out`);
     const removed = o.sites.filter((s) => !n.sites.includes(s));
     if (removed.length) out.push(`"${o.name}" unblocks ${removed.join(", ")}`);
   }
@@ -538,5 +616,5 @@ export function loosenings(oldS: Settings, newS: Settings): string[] {
 
 // True if group b is easier than group a on any limit.
 function easier(a: Group, b: Group): boolean {
-  return b.dailyMin > a.dailyMin || b.sessionMin > a.sessionMin || b.cooldownMin < a.cooldownMin || (a.confirm && !b.confirm);
+  return b.dailyMin > a.dailyMin || b.sessionMin > a.sessionMin || b.cooldownMin < a.cooldownMin || (a.confirm && !b.confirm) || (!a.searchOnly && !!b.searchOnly);
 }
