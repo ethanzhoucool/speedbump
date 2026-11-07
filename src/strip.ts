@@ -9,6 +9,7 @@
   let host: HTMLDivElement | null = null;
   let shown = "";
   let video: string | null = null;
+  let current: SearchInfo | null = null;
 
   // Hidden until the worker answers, so a feed never flashes first. If it never answers, the site just opens.
   html.dataset.speedbump = "wait";
@@ -60,19 +61,25 @@
   }
 
   async function refresh() {
-    let info: SearchInfo | null = null;
+    let reply: SearchInfo | "session" | null = null;
     try {
-      info = await chrome.runtime.sendMessage({ type: "searchOnly", url: location.href });
+      reply = await chrome.runtime.sendMessage({ type: "searchOnly", url: location.href });
     } catch {
       // The extension was reloaded or the worker failed, so the site just opens.
     }
     clearTimeout(giveUp);
+    const info = reply === "session" ? null : reply;
+    current = info;
     // Autoplay, or anything else that goes straight from one video to another. Reaching a new one takes a search.
     const next = location.pathname === "/watch" ? new URLSearchParams(location.search).get("v") : null;
     if (info && video && next && next !== video) return location.replace(info.home);
     video = next;
-    if (!info) delete html.dataset.speedbump;
+    const before = html.dataset.speedbump;
+    if (reply === "session") html.dataset.speedbump = "session";
+    else if (!info) delete html.dataset.speedbump;
     else html.dataset.speedbump = info.atHome ? "home" : info.name.toLowerCase();
+    // Stripping a page with a video playing widens the player, and YouTube only resizes the video on this event.
+    if (html.dataset.speedbump !== before) window.dispatchEvent(new Event("resize"));
     const key = JSON.stringify(info);
     if (key === shown) return;
     shown = key;
@@ -80,6 +87,17 @@
     host = null;
     if (info) mount(info);
   }
+
+  // A finished video goes to the search page before autoplay can start another. With the cooldown over, that next
+  // video would count as a visit and start a session. Capturing, because media events don't bubble. An ad ending
+  // fires this too, but the wait lets the real video take over, so it no longer reads as ended.
+  document.addEventListener("ended", (e) => {
+    const v = e.target;
+    setTimeout(() => {
+      if (!current || !(v instanceof HTMLVideoElement) || !v.ended) return;
+      if (document.querySelector(".html5-video-player.ended-mode:not(.ad-showing)")) chrome.runtime.sendMessage({ type: "videoEnded", groupId: current.groupId });
+    }, 500);
+  }, true);
 
   chrome.runtime.onMessage.addListener((m: { type?: string }) => { if (m?.type === "searchOnlyChanged") refresh(); });
   refresh();

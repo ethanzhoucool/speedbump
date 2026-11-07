@@ -228,8 +228,9 @@ async function tick() {
   }
   const { agentTabs } = await agentStore();
   const passed = (t: chrome.tabs.Tab) => (agentTabs[t.id!]?.end ?? 0) > Date.now();
-  const { kicked, loose } = await withState((_s, st, now) => {
+  const { kicked, finishing, loose } = await withState((_s, st, now) => {
     const out: [number, string][] = [];
+    const finishing: number[] = [];
     for (const group of settings.groups) {
       const g = st.groups[group.id];
       if (!g?.session) continue;
@@ -239,9 +240,11 @@ async function tick() {
       const ended = settle(group, g, now, settings.idleGraceMin * MIN);
       if (ended === "expired") {
         for (const t of open) {
-          const home = searchRoute(t.url!, group)?.home;
-          if (home) sentHome.set(t.id!, home);
-          out.push([t.id!, home ?? gateUrl(group.id, t.url!)]);
+          const route = searchRoute(t.url!, group);
+          // A video or thread stays open so it can be finished. Only the page around it goes.
+          if (route && !route.atHome && !route.redirect) { finishing.push(t.id!); continue; }
+          if (route) sentHome.set(t.id!, route.home);
+          out.push([t.id!, route?.home ?? gateUrl(group.id, t.url!)]);
         }
       }
       else if (!ended && open.some((t) => t.active)) g.session.lastSeen = now;
@@ -249,10 +252,11 @@ async function tick() {
     // A site still in front with no session (End was pressed, or the day rolled over) would otherwise
     // stay usable until its next navigation, which a feed or a video may never make.
     const loose = tabsWithoutSession(tabs, settings, st, now).filter((t) => !out.some(([id]) => id === t.id));
-    return { kicked: out, loose };
+    return { kicked: out, finishing, loose };
   });
   for (const [id, url] of kicked) chrome.tabs.update(id, { url }).catch(() => {});
-  if (kicked.length) notifyEnd();
+  for (const id of finishing) chrome.tabs.sendMessage(id, { type: "searchOnlyChanged" }).catch(() => {});
+  if (kicked.length || finishing.length) notifyEnd(finishing.length > 0);
   // Not a repeat of the navigation event that `recent` dedupes, so let it through.
   for (const t of loose) { recent.delete(t.id!); check(t.id!, t.url!, true); }
   // An expired pass sends its tab to the gate like any other visit. A tab in front was just checked above,
@@ -269,10 +273,10 @@ async function tick() {
   updateBadge();
 }
 
-function notifyEnd() {
+function notifyEnd(finishing: boolean) {
   chrome.notifications?.create({
     type: "basic", iconUrl: "icons/128.png", title: "Session over",
-    message: "Time's up. Nice work stopping here.", priority: 0,
+    message: finishing ? "Time's up. You can finish what's open, and the rest is search only." : "Time's up. Nice work stopping here.", priority: 0,
   });
 }
 
@@ -351,7 +355,7 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       return withState((_s, st, now) => {
         const g = live(st, match, settings, now);
         const stat = status(match, g, now);
-        if (stat === "active") return null;
+        if (stat === "active") return "session" as const;
         const until = stat === "cooldown" ? cooldownUntil(match, g) : stat === "exhausted" ? nextResetAt(now, settings.resetHour) : 0;
         // A page that's being redirected shows the search page too, so it doesn't appear for a moment first.
         return { groupId: match.id, name: route.name, home: route.home, action: route.action, param: route.param, atHome: route.atHome || !!route.redirect, until };
@@ -363,6 +367,14 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       if (!group || tab?.id === undefined || !tab.url) return { ok: false };
       await withState((_s, st) => { gs(st, group.id).attempts += 1; });
       await chrome.tabs.update(tab.id, { url: gateUrl(group.id, tab.url) });
+      return { ok: true };
+    }
+    case "videoEnded": {
+      const tab = sender.tab;
+      const route = group && tab?.url ? searchRoute(tab.url, group) : null;
+      if (!route || tab?.id === undefined) return { ok: false };
+      sentHome.set(tab.id, route.home);
+      await chrome.tabs.update(tab.id, { url: route.home });
       return { ok: true };
     }
     case "pill": {

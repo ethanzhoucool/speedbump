@@ -3,6 +3,9 @@
 html[data-speedbump="wait"] { visibility: hidden !important; }
 html[data-speedbump="home"] body { display: none !important; }
 
+/* During a session the site is all there, except the recommendations next to a video. Playlists and live chat share that column and stay. */
+html[data-speedbump="session"] ytd-watch-flexy #related { display: none !important; }
+
 /* YouTube: where a list can be allow-listed it is, so anything new YouTube adds stays hidden too. */
 html[data-speedbump="youtube"] :is(
   ytd-page-manager > :not(ytd-search, ytd-watch-flexy),

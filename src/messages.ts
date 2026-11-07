@@ -17,7 +17,8 @@ export type Message =
   | { type: "agentPass"; url: string; answer: string }
   | { type: "nuclear"; minutes: number }
   | { type: "searchOnly"; url: string }
-  | { type: "openGate"; groupId: string };
+  | { type: "openGate"; groupId: string }
+  | { type: "videoEnded"; groupId: string };
 
 export interface PillInfo { groupId: string; name: string; end: number; intent: string }
 
@@ -44,8 +45,9 @@ export interface Replies {
   agentProblem: AgentProblemView | { missing: true };
   agentPass: Ok;
   nuclear: { until: number };
-  searchOnly: SearchInfo | null;
+  searchOnly: SearchInfo | "session" | null;
   openGate: Ok;
+  videoEnded: Ok;
 }
 
 export function send<M extends Message>(msg: M): Promise<Replies[M["type"]]> {
