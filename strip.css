@@ -3,8 +3,9 @@
 html[data-speedbump="wait"] { visibility: hidden !important; }
 html[data-speedbump="home"] body { display: none !important; }
 
-/* During a session the site is all there, except the recommendations next to a video. Playlists and live chat share that column and stay. */
-html[data-speedbump="session"] ytd-watch-flexy #related { display: none !important; }
+/* During a session the site is all there, except the recommendations next to a video. Hidden by the list, not the
+   column: playlists and live chat share the column and stay, and some layouts move the list under the video. */
+html[data-speedbump="session"] :is(ytd-watch-flexy #related, ytd-watch-flexy ytd-watch-next-secondary-results-renderer) { display: none !important; }
 
 /* YouTube: where a list can be allow-listed it is, so anything new YouTube adds stays hidden too. */
 html[data-speedbump="youtube"] :is(
@@ -15,7 +16,7 @@ html[data-speedbump="youtube"] :is(
   ytd-search ytd-video-renderer #menu,
   ytd-search #secondary,
   ytd-search ytd-section-list-renderer > #contents > ytd-continuation-item-renderer,
-  ytd-watch-flexy #secondary, ytd-watch-flexy ytd-comments, ytd-watch-flexy #clarify-box, ytd-watch-flexy #ticket-shelf,
+  ytd-watch-flexy #secondary, ytd-watch-flexy #related, ytd-watch-flexy ytd-watch-next-secondary-results-renderer, ytd-watch-flexy ytd-comments, ytd-watch-flexy #clarify-box, ytd-watch-flexy #ticket-shelf,
   ytd-watch-flexy #shopping-timely-shelf, ytd-watch-flexy #merch-shelf, ytd-watch-flexy #expandable-metadata,
   ytd-watch-metadata #actions, ytd-watch-metadata #subscribe-button, ytd-watch-metadata #sponsor-button, ytd-watch-metadata #analytics-button,
   ytd-structured-description-content-renderer > #items > :not(ytd-video-description-header-renderer, ytd-expandable-video-description-body-renderer),

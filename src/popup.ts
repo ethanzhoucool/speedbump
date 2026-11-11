@@ -79,7 +79,7 @@ function renderNuclear(data: Summary, now: number) {
   $("nukePanel").hidden = on;
   if (!on) return;
   $("nukeLeft").textContent = `${fmt(data.nuclearUntil - now)} left`;
-  $("nukeUntil").textContent = `Limited sites close on sight until ${new Date(data.nuclearUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`;
+  $("nukeUntil").textContent = `Limited sites close on sight until ${new Date(data.nuclearUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. YouTube stays for search.`;
 }
 
 function render(data: Summary) {

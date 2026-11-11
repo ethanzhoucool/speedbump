@@ -3,7 +3,7 @@
 // attribute set here. The search page is drawn here too, so it keeps working whatever the site changes.
 // This is a classic content script, so it can't import; SearchInfo mirrors messages.ts.
 (() => {
-  interface SearchInfo { groupId: string; name: string; home: string; action: string; param: string; atHome: boolean; until: number }
+  interface SearchInfo { groupId: string; name: string; home: string; action: string; param: string; atHome: boolean; until: number; nuclear: boolean }
 
   const html = document.documentElement;
   let host: HTMLDivElement | null = null;
@@ -32,7 +32,10 @@
     .pill a, .pill button { all:unset; cursor:pointer; padding:6px 11px; border-radius:999px; background:rgb(255 255 255 / .08); font-weight:600; font-size:12px; }
     .pill a:hover, .pill button:hover { background:rgb(255 255 255 / .16); }`;
 
-  const backText = (until: number) => until ? `Full site back at ${new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : "Your time is back for the next page you open.";
+  const at = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const backText = (info: SearchInfo) =>
+    info.nuclear ? `Nuclear mode until ${at(info.until)}. Gaming videos close.`
+    : info.until ? `Full site back at ${at(info.until)}.` : "Your time is back for the next page you open.";
 
   function mount(info: SearchInfo) {
     host = document.createElement("div");
@@ -45,15 +48,16 @@
           <input name="${info.param}" type="search" placeholder="Search ${info.name}" aria-label="Search ${info.name}" autocomplete="off" required>
           <button class="go">Search</button>
         </form>
-        <p class="back">${backText(info.until)}</p>
-        <button class="more" data-more>Need more time?</button>
+        <p class="back">${backText(info)}</p>
+        ${info.nuclear ? "" : `<button class="more" data-more>Need more time?</button>`}
       </div>` : `
-      <div class="pill" title="${backText(info.until)}">
+      <div class="pill" title="${backText(info)}">
         <span>Search only</span>
         <a href="${info.home}">New search</a>
-        <button data-more>More time</button>
+        ${info.nuclear ? "" : `<button data-more>More time</button>`}
       </div>`}`;
-    root.querySelector("[data-more]")!.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openGate", groupId: info.groupId }));
+    // Nuclear mode closes the gate, so there's no asking for more time while it lasts.
+    root.querySelector("[data-more]")?.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openGate", groupId: info.groupId }));
     // Otherwise the site reads what's typed here as its own keyboard shortcuts.
     for (const type of ["keydown", "keypress", "keyup"]) root.addEventListener(type, (e) => e.stopPropagation());
     html.appendChild(host);
@@ -80,12 +84,37 @@
     else html.dataset.speedbump = info.atHome ? "home" : info.name.toLowerCase();
     // Stripping a page with a video playing widens the player, and YouTube only resizes the video on this event.
     if (html.dataset.speedbump !== before) window.dispatchEvent(new Event("resize"));
+    if (info?.nuclear && next) reportCategory(next);
     const key = JSON.stringify(info);
     if (key === shown) return;
     shown = key;
     host?.remove();
     host = null;
     if (info) mount(info);
+  }
+
+  // During nuclear mode the worker closes a video in a category it rules out (Gaming), so it hears each video's
+  // category. YouTube puts it in the structured data it rewrites for every video. That arrives a moment after
+  // the video does, and the last video's copy can still be there, so it only counts once it names this video.
+  // The <meta itemprop="genre"> tag isn't used: it keeps the first video's category for the life of the page.
+  let reported: string | null = null;
+  let reportTimer: ReturnType<typeof setInterval> | undefined;
+  function reportCategory(id: string) {
+    if (reported === id) return;
+    reported = id;
+    clearInterval(reportTimer);
+    const started = Date.now();
+    reportTimer = setInterval(() => {
+      if (reported !== id || Date.now() - started > 20000) return clearInterval(reportTimer);
+      for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+        let data: { embedUrl?: unknown; genre?: unknown } | null = null;
+        try { data = JSON.parse(s.textContent ?? ""); } catch { continue; }
+        if (typeof data?.embedUrl !== "string" || !data.embedUrl.endsWith(`/${id}`) || typeof data.genre !== "string") continue;
+        clearInterval(reportTimer);
+        chrome.runtime.sendMessage({ type: "videoCategory", category: data.genre }).catch(() => {});
+        return;
+      }
+    }, 500);
   }
 
   // A finished video goes to the search page before autoplay can start another. With the cooldown over, that next

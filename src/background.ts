@@ -4,7 +4,7 @@ import {
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   clampSession,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
-  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, nuclearOn, startNuclear,
+  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, nuclearOn, startNuclear, nuclearCloses,
   settle, searchRoute, upgradeToV3,
 } from "./core.ts";
 import type { AgentProblem, GateInfo, Group, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
@@ -154,10 +154,16 @@ async function check(tabId: number, url: string | undefined, passive = false) {
   recent.set(tabId, { url, t: Date.now() });
   const group = matchGroup(url, await loadSettings());
   if (!group) return;
-  // Checked before agent passes, because nuclear mode has no exceptions.
-  if (await nuclearActive()) return closeTab(tabId);
-  if (await agentAllowed(tabId, group.id)) return;
   const route = searchRoute(url, group);
+  // Checked before agent passes, because nuclear mode has no exceptions. YouTube stays for search as it does
+  // when out of time, and strip.ts reports each video's category so one in a closed category goes too.
+  if (await nuclearActive()) {
+    if (!route?.nuclear) return closeTab(tabId);
+    if (route.redirect) chrome.tabs.update(tabId, { url: route.redirect }).catch(() => {});
+    else chrome.tabs.sendMessage(tabId, { type: "searchOnlyChanged" }).catch(() => {});
+    return;
+  }
+  if (await agentAllowed(tabId, group.id)) return;
   const outcome = await withState((s, st, now) => {
     const g = live(st, group, s, now);
     const stat = status(group, g, now);
@@ -223,7 +229,14 @@ async function tick() {
   // One at a time, so closeTab sees how many tabs are really left in the window.
   if (await nuclearActive()) {
     for (const t of tabs) {
-      if (t.url && (t.url.startsWith(GATE) || matchGroup(t.url, settings))) await closeTab(t.id!);
+      if (!t.url) continue;
+      const group = t.url.startsWith(GATE) ? null : matchGroup(t.url, settings);
+      const route = group && searchRoute(t.url, group);
+      // Kept for search, but off any page search-only mode removes, and stripped if it was open in full.
+      if (route?.nuclear) {
+        if (route.redirect) chrome.tabs.update(t.id!, { url: route.redirect }).catch(() => {});
+        else chrome.tabs.sendMessage(t.id!, { type: "searchOnlyChanged" }).catch(() => {});
+      } else if (group || t.url.startsWith(GATE)) await closeTab(t.id!);
     }
   }
   const { agentTabs } = await agentStore();
@@ -351,14 +364,17 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       const match = matchGroup(msg.url, settings);
       const route = match && searchRoute(msg.url, match);
       if (!match || !route) return null;
-      if (sender.tab?.id !== undefined && await agentAllowed(sender.tab.id, match.id)) return null;
+      // Nuclear mode has no exceptions, so an agent pass doesn't open the full site then.
+      const nuclear = route.nuclear && await nuclearActive();
+      if (!nuclear && sender.tab?.id !== undefined && await agentAllowed(sender.tab.id, match.id)) return null;
       return withState((_s, st, now) => {
         const g = live(st, match, settings, now);
         const stat = status(match, g, now);
-        if (stat === "active") return "session" as const;
-        const until = stat === "cooldown" ? cooldownUntil(match, g) : stat === "exhausted" ? nextResetAt(now, settings.resetHour) : 0;
+        if (stat === "active" && !nuclear) return "session" as const;
+        let until = stat === "cooldown" ? cooldownUntil(match, g) : stat === "exhausted" ? nextResetAt(now, settings.resetHour) : 0;
+        if (nuclear) until = Math.max(until, st.nuclearUntil);
         // A page that's being redirected shows the search page too, so it doesn't appear for a moment first.
-        return { groupId: match.id, name: route.name, home: route.home, action: route.action, param: route.param, atHome: route.atHome || !!route.redirect, until };
+        return { groupId: match.id, name: route.name, home: route.home, action: route.action, param: route.param, atHome: route.atHome || !!route.redirect, until, nuclear };
       });
     }
     // Search-only mode skips the gate, and this is the way back to it for borrowing time.
@@ -375,6 +391,14 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
       if (!route || tab?.id === undefined) return { ok: false };
       sentHome.set(tab.id, route.home);
       await chrome.tabs.update(tab.id, { url: route.home });
+      return { ok: true };
+    }
+    case "videoCategory": {
+      const tab = sender.tab;
+      const match = tab?.url ? matchGroup(tab.url, settings) : null;
+      if (tab?.id === undefined || !match || !searchRoute(tab.url!, match)?.nuclear) return { ok: false };
+      if (!nuclearCloses(msg.category) || !(await nuclearActive())) return { ok: false };
+      await closeTab(tab.id);
       return { ok: true };
     }
     case "pill": {

@@ -1,7 +1,7 @@
 // Run with: npm test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_SETTINGS, loosenings, matchGroup, searchRoute, upgradeToV3 } from "../src/core.ts";
+import { DEFAULT_SETTINGS, loosenings, matchGroup, nuclearCloses, searchRoute, upgradeToV3 } from "../src/core.ts";
 import type { Group, Settings } from "../src/core.ts";
 
 const clone = <T>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -78,6 +78,19 @@ test("sites and groups without search-only mode keep the gate", () => {
   assert.equal(searchRoute("https://www.youtube.com/", { ...video, searchOnly: false }), null);
   assert.equal(searchRoute("https://studio.youtube.com/", video), null);
   assert.equal(searchRoute("https://chat.reddit.com/", reddit), null);
+});
+
+test("nuclear mode keeps YouTube for search, and nothing else", () => {
+  assert.equal(searchRoute("https://www.youtube.com/watch?v=abc", video)?.nuclear, true);
+  assert.equal(searchRoute("https://m.youtube.com/feed/you", video)?.nuclear, true, "a page it redirects away from too");
+  assert.equal(searchRoute("https://www.reddit.com/search/?q=boots", reddit)?.nuclear, false);
+  assert.equal(searchRoute("https://www.youtube.com/", { ...video, searchOnly: false }), null, "with Search off it closes like any site");
+});
+
+test("nuclear mode closes Gaming videos only", () => {
+  assert.equal(nuclearCloses("Gaming"), true);
+  assert.equal(nuclearCloses(" gaming "), true);
+  for (const c of ["Science & Technology", "Education", "Entertainment", "Music", ""]) assert.equal(nuclearCloses(c), false, c);
 });
 
 test("the upgrade moves a stock install onto the new rules", () => {

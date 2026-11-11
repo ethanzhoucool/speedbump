@@ -18,12 +18,13 @@ export type Message =
   | { type: "nuclear"; minutes: number }
   | { type: "searchOnly"; url: string }
   | { type: "openGate"; groupId: string }
-  | { type: "videoEnded"; groupId: string };
+  | { type: "videoEnded"; groupId: string }
+  | { type: "videoCategory"; category: string };
 
 export interface PillInfo { groupId: string; name: string; end: number; intent: string }
 
 // strip.ts is a classic content script and keeps its own copy of this shape.
-export interface SearchInfo { groupId: string; name: string; home: string; action: string; param: string; atHome: boolean; until: number }
+export interface SearchInfo { groupId: string; name: string; home: string; action: string; param: string; atHome: boolean; until: number; nuclear: boolean }
 
 export interface Ok { ok: boolean; error?: string }
 
@@ -48,6 +49,7 @@ export interface Replies {
   searchOnly: SearchInfo | "session" | null;
   openGate: Ok;
   videoEnded: Ok;
+  videoCategory: Ok;
 }
 
 export function send<M extends Message>(msg: M): Promise<Replies[M["type"]]> {

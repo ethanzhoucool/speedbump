@@ -24,8 +24,9 @@ export function agentPassUrl(url: string): string {
 }
 
 // Nuclear mode closes limited tabs on sight for a set time. Like any tightening it starts at once,
-// and nothing ends it early. The cap keeps a typo from locking someone out for a month.
-export const NUCLEAR = { defaultMin: 30, maxMin: 24 * 60, presets: [15, 30, 60, 120, 240] };
+// and nothing ends it early. The cap keeps a typo from locking someone out for a month. YouTube stays
+// for search instead, but a video in one of `categories` (YouTube's own, set by the uploader) closes.
+export const NUCLEAR = { defaultMin: 30, maxMin: 24 * 60, presets: [15, 30, 60, 120, 240], categories: ["Gaming"] };
 
 export interface Group {
   id: string;
@@ -261,7 +262,8 @@ export function matchGroup(url: string, settings: Settings): Group | null {
 // What's left of a site in search-only mode. `hosts` maps each hostname to the origin it belongs on, and
 // `open` lists the paths that stay reachable. Every other path goes back to the search page, so feeds,
 // channels and subreddits are gone by URL, whatever a site does to its page layout.
-interface SearchSite { name: string; hosts: Record<string, string>; action: string; param: string; open: RegExp[] }
+// `nuclear` keeps the site for search during nuclear mode instead of closing it.
+interface SearchSite { name: string; hosts: Record<string, string>; action: string; param: string; open: RegExp[]; nuclear?: boolean }
 
 const YOUTUBE = "https://www.youtube.com";
 const REDDIT = "https://www.reddit.com";
@@ -273,6 +275,7 @@ const SEARCH_SITES: SearchSite[] = [
     param: "search_query",
     // Videos have to play or search is no use. Links in a description go through /redirect.
     open: [/^\/(results|watch|redirect)\/?$/],
+    nuclear: true,
   },
   {
     name: "Reddit",
@@ -292,6 +295,8 @@ export interface SearchRoute {
   atHome: boolean;
   // Where the tab has to go instead, if this URL isn't part of search-only mode.
   redirect: string | null;
+  // Stays for search during nuclear mode instead of closing.
+  nuclear: boolean;
 }
 
 export function searchRoute(url: string, group: Group): SearchRoute | null {
@@ -304,7 +309,7 @@ export function searchRoute(url: string, group: Group): SearchRoute | null {
   const atHome = path === "/";
   const open = atHome || site.open.some((r) => r.test(path));
   const redirect = !open ? `${origin}/` : new URL(url).origin === origin ? null : origin + p.rest;
-  return { name: site.name, home: `${origin}/`, action: origin + site.action, param: site.param, atHome, redirect };
+  return { name: site.name, home: `${origin}/`, action: origin + site.action, param: site.param, atHome, redirect, nuclear: !!site.nuclear };
 }
 
 export interface TabLike { id?: number; url?: string; active?: boolean; status?: string }
@@ -469,6 +474,12 @@ export function borrow(group: Group, g: GroupState, now: number): number {
 
 export function nuclearOn(state: Pick<State, "nuclearUntil"> | undefined, now: number): boolean {
   return (state?.nuclearUntil ?? 0) > now;
+}
+
+// Whether a YouTube video in this category closes during nuclear mode.
+export function nuclearCloses(category: string): boolean {
+  const c = category.trim().toLowerCase();
+  return NUCLEAR.categories.some((n) => n.toLowerCase() === c);
 }
 
 // Running sessions end the usual way, so unused minutes go back and one left behind is only charged up to
