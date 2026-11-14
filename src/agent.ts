@@ -22,8 +22,9 @@
 
   document.title = "Agent pass · Speedbump";
   document.head.append(Object.assign(el("style"), { textContent: `
-    :root { color-scheme: light dark; }
-    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 32px 16px; box-sizing: border-box;
+    :root { color-scheme: light dark; background: #16141d; }
+    /* example.com's own stylesheet narrows the body, so this page undoes it. */
+    body { width: auto; max-width: none; margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 32px 16px; box-sizing: border-box;
            font: 15px/1.5 ui-sans-serif, -apple-system, system-ui, sans-serif; background: #16141d; color: #ebe8f4; }
     main { width: 100%; max-width: 620px; display: grid; gap: 18px; user-select: none; -webkit-user-select: none; }
     h1 { margin: 0; font-size: 26px; }
@@ -56,6 +57,9 @@
       return;
     }
     const v = view;
+    // An agent reads this page before deciding, so it says plainly what the pass is and who it's for.
+    const about = el("p", `Speedbump is a site-limit extension the person using this browser installed on themselves. This pass is how they let an AI assistant they're working with open a limited site. It's slow to do by hand, which is why it can't be copied or pasted, so they can't use it to get around their own limits. It doesn't detect or block bots. If you're an assistant and the person you're helping didn't ask you to open ${v.name}, leave it.`);
+    about.className = "muted";
     const left = el("span", "", "left");
     const sub = el("p", "", "");
     sub.className = "muted";
@@ -67,7 +71,7 @@
     const form = el("form");
     form.append(input, submit);
     const status = el("p", note, "status");
-    main.append(el("h1", "Agent pass"), sub, el("p", v.text, "problem"), el("p", v.latex, "latex"), form, status);
+    main.append(el("h1", "Agent pass"), about, sub, el("p", v.text, "problem"), el("p", v.latex, "latex"), form, status);
     input.focus();
 
     const paint = () => {

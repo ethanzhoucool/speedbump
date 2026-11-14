@@ -11,7 +11,7 @@ const groupId = params.get("g") || "";
 const target = params.get("u") || "";
 const app = $("app");
 // Agents only get this page's URL and title, so the title carries the way in. A person sees a long tab name.
-const agentTitle = (name: string) => `${name} · Speedbump · ${AGENT_HINT} ${agentPassUrl(target)}`;
+const agentTitle = (name: string) => `${name} · Speedbump, ${AGENT_HINT} ${agentPassUrl(target)}`;
 document.title = agentTitle("Limited");
 // Every gate message is about this page's group, so fill groupId in.
 function send<T extends GroupMessage["type"]>(msg: Omit<Extract<GroupMessage, { type: T }>, "groupId"> & { type: T }): Promise<Replies[T]> {

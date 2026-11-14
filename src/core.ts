@@ -17,7 +17,9 @@ export const CHALLENGE = "I want looser limits and I will still want them tomorr
 export const AGENT = { minutes: 15, answerSec: 120 };
 export const AGENT_PAGE = "https://example.com/";
 // Claude in Chrome can't read the gate, but it does see every tab's URL and title, so the hint goes there.
-export const AGENT_HINT = "AI agent? Solve the agent pass at";
+// It says what the pass is rather than telling an agent what to do. Agents rightly don't take orders from a
+// page, and a "solve this" aimed at them reads like a bot check. Their go-ahead has to come from the person.
+export const AGENT_HINT = "the browser owner's own site limit. Agent pass for their AI assistant:";
 
 export function agentPassUrl(url: string): string {
   return `${AGENT_PAGE}#speedbump=${encodeURIComponent(url)}`;
