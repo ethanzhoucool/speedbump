@@ -5,7 +5,7 @@ import {
   DEFAULT_SETTINGS as S, MIN, matchGroup, isAllowed, freshGroupState, status, startSession, endSession,
   remainingMs, sessionsLeft, pauseSeconds, lengthOptions, emptyState, gs, rollover, loosenings,
   canBorrow, borrow, requestChange, pendingStatus, HOUR, normalize, cooldownUntil,
-  makeAgentProblem, agentAnswer, checkAgentAnswer, agentText, agentPassUrl,
+  makeAgentProblem, agentAnswer, checkAgentAnswer, agentText, agentPassUrl, isClaudeGroup,
   NUCLEAR, nuclearOn, startNuclear,
 } from "../src/core.ts";
 import type { Settings } from "../src/core.ts";
@@ -251,4 +251,9 @@ test("agent pass URL round-trips the target", () => {
   const u = agentPassUrl("https://x.com/someone?a=1&b=2");
   assert.equal(u, "https://example.com/#speedbump=https%3A%2F%2Fx.com%2Fsomeone%3Fa%3D1%26b%3D2");
   assert.equal(decodeURIComponent(u.split("#speedbump=")[1]), "https://x.com/someone?a=1&b=2");
+});
+
+test("Claude in Chrome's tab groups are recognised, with or without a status mark", () => {
+  for (const t of ["Claude", "Claude (MCP)", "⌛Claude", "🔔Claude (MCP)", "✅Claude", "✅️ Claude"]) assert.ok(isClaudeGroup(t), t);
+  for (const t of [undefined, "", "claude", "Claude stuff", "My Claude", "Work", "⌛", "Claude (MCP) 2"]) assert.ok(!isClaudeGroup(t), String(t));
 });

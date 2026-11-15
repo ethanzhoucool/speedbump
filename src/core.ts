@@ -25,6 +25,14 @@ export function agentPassUrl(url: string): string {
   return `${AGENT_PAGE}#speedbump=${encodeURIComponent(url)}`;
 }
 
+// Claude in Chrome keeps every tab it drives in a tab group of its own, titled "Claude (MCP)" or "Claude",
+// with ⌛, 🔔 or ✅ in front while it works. A limited site in such a tab is Claude's, so it skips the gate.
+export const CLAUDE_GROUPS = ["Claude", "Claude (MCP)"];
+
+export function isClaudeGroup(title: string | undefined): boolean {
+  return CLAUDE_GROUPS.includes((title ?? "").replace(/^(?:⌛|🔔|✅)️?/u, "").trim());
+}
+
 // Nuclear mode closes limited tabs on sight for a set time. Like any tightening it starts at once,
 // and nothing ends it early. The cap keeps a typo from locking someone out for a month. YouTube stays
 // for search instead, but a video in one of `categories` (YouTube's own, set by the uploader) closes.
