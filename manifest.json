@@ -3,7 +3,7 @@
   "name": "Speedbump",
   "version": "1.1.0",
   "description": "Session-based site limits with a pause before you scroll.",
-  "permissions": ["storage", "tabs", "tabGroups", "alarms", "webNavigation", "notifications", "favicon"],
+  "permissions": ["storage", "tabs", "alarms", "webNavigation", "notifications", "favicon"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {

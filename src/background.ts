@@ -4,7 +4,7 @@ import {
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   clampSession,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
-  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, isClaudeGroup, nuclearOn, startNuclear, nuclearCloses,
+  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, inTabGroup, nuclearOn, startNuclear, nuclearCloses,
   settle, searchRoute, upgradeToV3,
 } from "./core.ts";
 import type { AgentProblem, GateInfo, Group, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
@@ -94,18 +94,11 @@ async function agentAllowed(tabId: number, groupId: string): Promise<boolean> {
   return (!!t && t.groupId === groupId && Date.now() < t.end) || claudeTab(tabId);
 }
 
-// A tab in Claude in Chrome's own tab group is Claude's, so it gets through with no pass. It's checked
-// live, so a tab dragged out of the group is limited again.
+// A tab in a tab group is Claude in Chrome's, so it gets through with no pass. It's checked live, so a tab
+// dragged out of its group is limited again.
 async function claudeTab(tabId: number): Promise<boolean> {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab || tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) return false;
-  const group = await chrome.tabGroups.get(tab.groupId).catch(() => null);
-  return isClaudeGroup(group?.title);
-}
-
-async function claudeTabIds(tabs: chrome.tabs.Tab[]): Promise<Set<number>> {
-  const groups = new Set((await chrome.tabGroups.query({})).filter((g) => isClaudeGroup(g.title)).map((g) => g.id));
-  return new Set(tabs.filter((t) => groups.has(t.groupId)).map((t) => t.id!));
+  return !!tab && inTabGroup(tab);
 }
 
 chrome.runtime.onInstalled.addListener(setup);
@@ -204,14 +197,8 @@ chrome.webNavigation.onBeforeNavigate.addListener((d) => { if (d.frameId === 0) 
 // Single-page apps (x.com, instagram) change URL without a full navigation.
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.url) check(tabId, info.url);
-  // Joining or leaving Claude's tab group changes whose tab it is. Nobody just went anywhere, so it's passive.
+  // Joining or leaving a tab group changes whose tab it is. Nobody just went anywhere, so it's passive.
   else if (info.groupId !== undefined && tab.url) { recent.delete(tabId); check(tabId, tab.url, true); }
-});
-// So does renaming the group.
-chrome.tabGroups.onUpdated.addListener(async (g) => {
-  for (const t of await chrome.tabs.query({ groupId: g.id })) {
-    if (t.url) { recent.delete(t.id!); check(t.id!, t.url, true); }
-  }
 });
 // Coming back to a tab that was left open counts as a new visit.
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -269,8 +256,7 @@ async function tick() {
     }
   }
   const { agentTabs } = await agentStore();
-  const claude = await claudeTabIds(tabs);
-  const passed = (t: chrome.tabs.Tab) => claude.has(t.id!) || (agentTabs[t.id!]?.end ?? 0) > Date.now();
+  const passed = (t: chrome.tabs.Tab) => inTabGroup(t) || (agentTabs[t.id!]?.end ?? 0) > Date.now();
   const { kicked, finishing, loose } = await withState((_s, st, now) => {
     const out: [number, string][] = [];
     const finishing: number[] = [];

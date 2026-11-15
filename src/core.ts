@@ -25,12 +25,13 @@ export function agentPassUrl(url: string): string {
   return `${AGENT_PAGE}#speedbump=${encodeURIComponent(url)}`;
 }
 
-// Claude in Chrome keeps every tab it drives in a tab group of its own, titled "Claude (MCP)" or "Claude",
-// with ⌛, 🔔 or ✅ in front while it works. A limited site in such a tab is Claude's, so it skips the gate.
-export const CLAUDE_GROUPS = ["Claude", "Claude (MCP)"];
+// Claude in Chrome keeps every tab it drives in a tab group, named "Claude", "Claude (MCP)" or after the
+// session. Speedbump assumes you don't group tabs yourself, so a limited site in any grouped tab is Claude's
+// and skips the gate.
+export const NO_GROUP = -1;
 
-export function isClaudeGroup(title: string | undefined): boolean {
-  return CLAUDE_GROUPS.includes((title ?? "").replace(/^(?:⌛|🔔|✅)️?/u, "").trim());
+export function inTabGroup(tab: { groupId?: number }): boolean {
+  return (tab.groupId ?? NO_GROUP) !== NO_GROUP;
 }
 
 // Nuclear mode closes limited tabs on sight for a set time. Like any tightening it starts at once,
