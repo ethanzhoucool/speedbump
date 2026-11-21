@@ -1,7 +1,7 @@
 // Run with: npm test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_SETTINGS, loosenings, matchGroup, nuclearCloses, searchRoute, upgradeToV3 } from "../src/core.ts";
+import { DEFAULT_SETTINGS, loosenings, matchGroup, nuclearCloses, pageCategory, searchRoute, upgradeToV3 } from "../src/core.ts";
 import type { Group, Settings } from "../src/core.ts";
 
 const clone = <T>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -91,6 +91,18 @@ test("nuclear mode closes Gaming videos only", () => {
   assert.equal(nuclearCloses("Gaming"), true);
   assert.equal(nuclearCloses(" gaming "), true);
   for (const c of ["Science & Technology", "Education", "Entertainment", "Music", ""]) assert.equal(nuclearCloses(c), false, c);
+});
+
+test("a watch page's category comes from its player data", () => {
+  // Trimmed from a real watch page in November 2026, whose structured data no longer had a genre.
+  const page = `<script type="application/ld+json">{"@type":"VideoObject","@id":"https://www.youtube.com/watch?v=Djf2LXXSfgc"}</script>
+    var ytInitialPlayerResponse = {"videoDetails":{"videoId":"Djf2LXXSfgc"},"microformat":{"playerMicroformatRenderer":{"viewCount":"92409","category":"Gaming","publishDate":"2026-11-18"}}};
+    <meta itemprop="genre" content="Gaming">`;
+  assert.equal(pageCategory(page, "Djf2LXXSfgc"), "Gaming");
+  assert.equal(pageCategory(`{"videoId":"abcdefghijk","category":"Film \\u0026 Animation"}`, "abcdefghijk"), "Film & Animation");
+  assert.equal(pageCategory(`{"videoId":"abcdefghijk"} <meta itemprop="genre" content="Pets &amp; Animals">`, "abcdefghijk"), "Pets & Animals", "the meta tag when the player data has none");
+  assert.equal(pageCategory(page, "somethingElse"), null, "another video's page doesn't count");
+  assert.equal(pageCategory(`{"videoId":"abcdefghijk"}`, "abcdefghijk"), null);
 });
 
 test("the upgrade moves a stock install onto the new rules", () => {

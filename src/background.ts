@@ -4,7 +4,7 @@ import {
   remainingMs, usedMs, sessionsLeft, pauseSeconds, lengthOptions, nextResetAt, loosenings,
   clampSession,
   BORROW, BORROW_PHRASE, canBorrow, borrow, budgetMs, requestChange, pendingStatus, normalize, cooldownUntil,
-  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, inTabGroup, nuclearOn, startNuclear, nuclearCloses,
+  AGENT, makeAgentProblem, agentText, checkAgentAnswer, agentPassUrl, inTabGroup, nuclearOn, startNuclear, nuclearCloses, pageCategory,
   settle, searchRoute, upgradeToV3,
 } from "./core.ts";
 import type { AgentProblem, GateInfo, Group, GroupState, Pending, PendingView, Settings, State, Summary, SummaryRow } from "./core.ts";
@@ -117,6 +117,27 @@ function gateUrl(groupId: string, url: string): string {
 // Reads the cached state directly because going through withState would write to storage on every check.
 async function nuclearActive(): Promise<boolean> {
   return nuclearOn(stateCache ?? (await stored("state")).state, Date.now());
+}
+
+// A video's category, from its own watch page. Signed out, so it's the same for everyone and nothing is
+// added to watch history. Found ones are kept for the worker's life, since a video's category rarely changes.
+const categories = new Map<string, string>();
+
+async function youtubeCategory(id: string): Promise<string | null> {
+  if (!/^[\w-]{6,20}$/.test(id)) return null;
+  if (categories.has(id)) return categories.get(id)!;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`https://www.youtube.com/watch?v=${id}`, { credentials: "omit" });
+      if (!res.ok) continue;
+      const category = pageCategory(await res.text(), id);
+      if (category) categories.set(id, category);
+      return category;
+    } catch {
+      // Offline or blocked. One more try, then the video stays.
+    }
+  }
+  return null;
 }
 
 const closing = new Set<number>();
@@ -412,8 +433,11 @@ async function handle(msg: Message, sender: chrome.runtime.MessageSender): Promi
     case "videoCategory": {
       const tab = sender.tab;
       const match = tab?.url ? matchGroup(tab.url, settings) : null;
-      if (tab?.id === undefined || !match || !searchRoute(tab.url!, match)?.nuclear) return { ok: false };
-      if (!nuclearCloses(msg.category) || !(await nuclearActive())) return { ok: false };
+      if (tab?.id === undefined || !match || !searchRoute(tab.url!, match)?.nuclear || !(await nuclearActive())) return { ok: false };
+      if (!nuclearCloses((await youtubeCategory(msg.id)) ?? "")) return { ok: false };
+      // The lookup takes a moment, so only close the tab if it's still on that video.
+      const still = await chrome.tabs.get(tab.id).catch(() => null);
+      if (!still?.url || new URL(still.url).searchParams.get("v") !== msg.id) return { ok: false };
       await closeTab(tab.id);
       return { ok: true };
     }

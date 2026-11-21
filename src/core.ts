@@ -493,6 +493,19 @@ export function nuclearCloses(category: string): boolean {
   return NUCLEAR.categories.some((n) => n.toLowerCase() === c);
 }
 
+// The category YouTube files a video under, read from that video's own watch page: its player data
+// ("category":"Gaming"), or failing that <meta itemprop="genre">. Null if the page isn't that video's or names
+// none. The structured data used to carry it too, until YouTube took it out in November 2026.
+export function pageCategory(html: string, videoId: string): string | null {
+  if (!html.includes(`"videoId":"${videoId}"`)) return null;
+  const player = html.match(/"category":"((?:[^"\\]|\\.)*)"/);
+  if (player) {
+    try { return JSON.parse(`"${player[1]}"`) as string; } catch { /* fall through to the meta tag */ }
+  }
+  const meta = html.match(/<meta itemprop="genre" content="([^"]*)"/);
+  return meta ? meta[1].replace(/&amp;/g, "&") : null;
+}
+
 // Running sessions end the usual way, so unused minutes go back and one left behind is only charged up to
 // when it was last seen. Starting again can only push the end out.
 export function startNuclear(state: State, settings: Settings, now: number, minutes: number): number {

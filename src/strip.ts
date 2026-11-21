@@ -93,28 +93,14 @@
     if (info) mount(info);
   }
 
-  // During nuclear mode the worker closes a video in a category it rules out (Gaming), so it hears each video's
-  // category. YouTube puts it in the structured data it rewrites for every video. That arrives a moment after
-  // the video does, and the last video's copy can still be there, so it only counts once it names this video.
-  // The <meta itemprop="genre"> tag isn't used: it keeps the first video's category for the life of the page.
+  // During nuclear mode the worker closes a video in a category it rules out (Gaming), so it hears about each
+  // video. It looks the category up itself: this page's own copy belongs to whichever video loaded first, and
+  // YouTube has changed where it keeps it before.
   let reported: string | null = null;
-  let reportTimer: ReturnType<typeof setInterval> | undefined;
   function reportCategory(id: string) {
     if (reported === id) return;
     reported = id;
-    clearInterval(reportTimer);
-    const started = Date.now();
-    reportTimer = setInterval(() => {
-      if (reported !== id || Date.now() - started > 20000) return clearInterval(reportTimer);
-      for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
-        let data: { embedUrl?: unknown; genre?: unknown } | null = null;
-        try { data = JSON.parse(s.textContent ?? ""); } catch { continue; }
-        if (typeof data?.embedUrl !== "string" || !data.embedUrl.endsWith(`/${id}`) || typeof data.genre !== "string") continue;
-        clearInterval(reportTimer);
-        chrome.runtime.sendMessage({ type: "videoCategory", category: data.genre }).catch(() => {});
-        return;
-      }
-    }, 500);
+    chrome.runtime.sendMessage({ type: "videoCategory", id }).catch(() => {});
   }
 
   // A finished video goes to the search page before autoplay can start another. With the cooldown over, that next

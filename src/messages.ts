@@ -19,7 +19,7 @@ export type Message =
   | { type: "searchOnly"; url: string }
   | { type: "openGate"; groupId: string }
   | { type: "videoEnded"; groupId: string }
-  | { type: "videoCategory"; category: string };
+  | { type: "videoCategory"; id: string };
 
 export interface PillInfo { groupId: string; name: string; end: number; intent: string }
 
